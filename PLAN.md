@@ -274,6 +274,14 @@ The actual reason for the fork. Depends on Phase D.
 - [ ] Dynamic mode: derive palette from current album art (art URLs already in the API)
 - [ ] Grid view + thumbnails for playlists/albums (GridView + Image delegates) —
       the single biggest fix for "too text-heavy"
+- [ ] Redesign the login screen (`LoginPage.qml`) — first thing a new user sees.
+      Observed on the running app: the same instruction appears three times
+      (header, card heading, button); the lower third of the page is empty because
+      the card is top-aligned rather than centred; everything is one weight and one
+      muted colour, so the primary button reads no louder than body text; the
+      explanatory paragraph is too low-contrast to read comfortably; the two icon
+      rows look interactive but are not; and the wordmark has no brand presence.
+      Screenshot taken during Phase D verification
 - [ ] Full Now Playing view: large art, dynamic background
 - [ ] Reorganize Settings into real sections: Account / Playback / Appearance / Connect
 - [ ] Sorting on collections (title, artist, recently added)
