@@ -213,20 +213,40 @@ before tagging a release.
 - [ ] Cut a real `v2.0.0` tag so users get an attested binary instead of a local Rust build
 - [ ] README rewrite: positioning vs the original and vs MPRIS popups
 
-## Phase D — Decomposition & test safety net
+## Phase D — Decomposition & test safety net — IN PROGRESS
 
-The prerequisite for everything visual. Nothing here changes behavior.
+The prerequisite for the UI overhaul. No behavior changes.
 
-- [ ] Extract the 10 inline page Components out of `Panel.qml` into their own files
-      (home, discover, detail, search, library, playlists, queue, devices, login, settings —
-      note `setupPage` is actually the settings screen and should be renamed)
+- [x] Share the keyboard modifier rules between the full player and the mini-player
+      (`ShortcutModifiers.qml`, covered by `tests/tst_shortcut_modifiers.qml`)
+- [x] Turn the panel's inline `KeyHint` into a real file (`PanelKeyHint.qml`) so pages
+      can use it from outside `Panel.qml`
+- [x] Extract the 10 inline page Components into their own files. `setupPage` was the
+      settings screen and is now `SettingsPage.qml`
+- [x] **Panel.qml: 6,636 → 4,421 lines**
+- [x] Guard the new boundary with `tests/test_page_interface.py`, wired into
+      `scripts/test.sh` and CI
 - [ ] Extract the 6 popups out of `Panel.qml`
-- [ ] Extract the shared keyboard/shortcut-hint state machine into one component,
-      deleting the 17 duplicated functions across `Panel.qml` and `BarWidget.qml`
-- [ ] Split `Service.qml` along its real seams: settings/session, playback state,
-      library, playlists, search, devices/Connect, sleep timer, auth
-- [ ] Add tests as each piece comes out — this is where red/green TDD becomes possible
-- [ ] Target: no file over ~800 lines
+- [ ] Split `Service.qml` (4,073 lines) along its real seams: settings/session, playback
+      state, library, playlists, search, devices/Connect, sleep timer, auth
+- [ ] Target: no file over ~800 lines (`Panel.qml`, `Service.qml`, `Api.js`,
+      `BarWidget.qml`, `DetailPage.qml` and `SettingsPage.qml` are still over)
+
+**What extraction cost, and what caught it.** Moving the pages out of `Panel.qml` broke
+four things that `qmllint` did not report: three pages reached for ids that only exist
+inside `Panel.qml` (`window`, `unifiedSearchField`), and three pages had their own root
+id that collided with the new one. `qmllint` flagged one of the four. The rest were found
+by a static check, which is now `tests/test_page_interface.py`.
+
+**Why the page tests are static.** A runtime test that builds each page would be better,
+but the pages use Quickshell UI types that cannot load in the offscreen test runner. That
+is the real reason `Panel.qml`, `Service.qml` and `BarWidget.qml` have no tests upstream —
+it is an environment limit, not an oversight. The static guard checks that every
+`page.panel.X` a page reads exists on the panel, and that no page reaches into the panel
+by id. Both failure modes are proven to fail the test.
+
+The page/panel boundary is now an explicit interface of 71 members. Narrowing it is
+worthwhile future work; it was previously unbounded scope access.
 
 ## Phase E — Audio & playback
 

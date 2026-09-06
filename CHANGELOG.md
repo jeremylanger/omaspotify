@@ -20,3 +20,7 @@ Changes below start from the fork point. For the history of the original plugin,
   cache, socket, keyring entry, backend binary and Spotify Connect device name,
   so it installs alongside the original instead of colliding with it.
 - Playback backends are now verified against this repository's own releases.
+- Moved the ten player screens out of Panel.qml into their own files, taking it
+  from 6,636 to 4,421 lines. The panel and its screens now talk through one
+  explicit property instead of shared file scope.
+- Share the keyboard modifier rules between the full player and the mini-player.
