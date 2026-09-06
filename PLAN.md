@@ -102,6 +102,19 @@ Checked against the code and upstream sources. Anything not listed here is an as
   Building it ourselves means writing into the audio pipeline by hand — real work,
   real liability. Deprioritized
 
+**Spotify app identity — we cannot register our own**
+- Web API access uses ncspot's public client id `d420a117...`, so the browser consent
+  screen says **"ncspot"**, not OmaSpotify. This is deliberate and inherited from upstream
+- Registering our own app is not viable: Spotify cut Development Mode to **5 users** in
+  February 2026, and Extended Quota is only open to organisations with 250k+ monthly
+  active users. An own-app OmaSpotify would work for five people
+- Every open-source Spotify client shares this constraint; spotify-player also adopted
+  ncspot's client id
+- Consequences to accept: a confusing consent screen, a rate limit shared with every
+  ncspot and spotify-player user, and a hard dependency on that id staying alive
+- [ ] Say this plainly in the README so the "ncspot" prompt does not look like a phish
+- The playback backend authorises separately using librespot's own default client id
+
 **Fork blocker**
 - `scripts/build-backend.sh` hardcodes `repository=stappmus/Omarchy-Spotify` and verifies
   GitHub build attestation against *upstream's* releases. In our fork that check can never
