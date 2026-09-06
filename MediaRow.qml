@@ -76,7 +76,7 @@ BorderSurface {
 
   width: parent ? parent.width : implicitWidth
   implicitWidth: Style.space(420)
-  implicitHeight: Style.space(66)
+  implicitHeight: Style.space(58)
   height: implicitHeight
   radius: Style.cornerRadius
   color: selected || reorderDragging
@@ -95,8 +95,8 @@ BorderSurface {
     id: titleMetrics
     text: root.itemData ? String(root.itemData.name || "Untitled") : "Untitled"
     font.family: root.fontFamily
-    font.pixelSize: Style.font.body
-    font.bold: root.selected
+    font.pixelSize: Style.font.subtitle
+    font.weight: root.selected ? Font.Bold : Font.DemiBold
   }
 
   MouseArea {
@@ -221,8 +221,8 @@ BorderSurface {
         text: root.itemData ? String(root.itemData.name || "Untitled") : "Untitled"
         color: root.foreground
         font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: root.selected
+        font.pixelSize: Style.font.subtitle
+        font.weight: root.selected ? Font.Bold : Font.DemiBold
         elide: Text.ElideRight
       }
 
@@ -252,10 +252,13 @@ BorderSurface {
         visible: root.durationActionVisible
           && (!root.compactActions || root.actionsExpanded)
         anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(38)
+        horizontalAlignment: Text.AlignRight
+        rightPadding: Style.space(4)
         text: Api.millisecondsToClock(root.itemData ? root.itemData.durationMs : 0)
         color: root.muted
         font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
+        font.pixelSize: Style.font.bodySmall
       }
 
       Button {
