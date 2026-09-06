@@ -294,6 +294,33 @@ Lossless is out (see Verified facts). These are the wins that are actually avail
       re-pin onto upstream `dev` once it merges
 - [ ] Crossfade — parked. Not in librespot; would mean hand-writing audio pipeline code
 
+### Crackles and pops — first investigation
+
+Reported as audible during playback, and **also present on the native Spotify client,
+though less badly**. That points below our app. Measured on the dev machine:
+
+- Over 30 seconds of active playback the sink recorded **zero new xruns**, so it is
+  intermittent and was not reproducible during the pass
+- Error counts are cumulative since each client started, not current rates:
+  `voxtype` 1160 over 3 days (negligible), `wayvibes` 19 in 48 minutes (~1 per 2.5 min),
+  our backend 11, the sink 30
+- PipeWire is locked to 48 kHz (`clock.allowed-rates = [ 48000 ]`). **Spotify streams
+  44.1 kHz**, so every track we play is resampled. Our backend's stream shows as
+  `331/44100`
+- `wayvibes` holds an always-on ~6 ms real-time stream for keyboard sounds. It has the
+  highest xrun rate of anything on the machine and would affect the native client too,
+  which matches the report
+- Our unit asks for `PULSE_LATENCY_MSEC=30`. Upstream chose that for track-change
+  responsiveness; it is aggressive for music and is our only lever
+
+Next steps, cheapest first. Nothing changed yet — the fault was not reproducible, so a
+speculative fix could not be measured:
+
+- [ ] A/B with `wayvibes` stopped, since it is the highest-xrun client and is always on
+- [ ] Add 44100 to PipeWire's `clock.allowed-rates` so Spotify audio is not resampled
+- [ ] Only then consider raising `PULSE_LATENCY_MSEC`, ideally as a setting rather than a
+      new hardcoded default, and measure xruns before and after
+
 ## Phase F — UI/UX overhaul
 
 The actual reason for the fork. Depends on Phase D.
