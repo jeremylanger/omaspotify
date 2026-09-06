@@ -332,8 +332,7 @@ fn track_id_for(uri: &str) -> TrackId {
     if id.is_empty() {
         id = "track".to_string();
     }
-    TrackId::try_from(format!("/com/github/OmaSpotify/track/{id}"))
-        .unwrap_or(TrackId::NO_TRACK)
+    TrackId::try_from(format!("/com/github/OmaSpotify/track/{id}")).unwrap_or(TrackId::NO_TRACK)
 }
 
 fn bus_name_suffix(process_id: u32) -> String {

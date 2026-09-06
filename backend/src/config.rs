@@ -161,10 +161,8 @@ mod tests {
 
     #[test]
     fn reads_existing_spotifyd_shape() {
-        let dir = std::env::temp_dir().join(format!(
-            "omaspotify-config-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("omaspotify-config-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("playback.conf");
         let mut file = fs::File::create(&path).unwrap();
