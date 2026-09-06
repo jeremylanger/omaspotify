@@ -1333,7 +1333,7 @@ Item {
 
   function contextMenuButtons() {
     var result = []
-    var kids = contextMenuContent ? contextMenuContent.children : []
+    var kids = mediaContextMenu.actionButtons()
     for (var i = 0; i < kids.length; i++) {
       var child = kids[i]
       var action = child && child.contextAction ? String(child.contextAction) : ""

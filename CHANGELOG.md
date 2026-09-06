@@ -24,6 +24,9 @@ Changes below start from the fork point. For the history of the original plugin,
   Settings. Quiet and loud tracks now play at a similar level, which closes the
   loudness gap against the official client.
 - Cached audio moved from ~/.cache/spotifyd to ~/.cache/omaspotify/audio.
+- Fixed arrow-key navigation in the track context menu, which stopped working
+  when the menu moved into its own file.
+- Renamed the sidebar heading to the app's own name.
 - Moved the ten player screens out of Panel.qml into their own files, taking it
   from 6,636 to 4,421 lines. The panel and its screens now talk through one
   explicit property instead of shared file scope.

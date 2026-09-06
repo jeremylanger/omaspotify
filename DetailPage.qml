@@ -133,7 +133,7 @@ Item {
             artists: page.panel.service && page.panel.service.detailItem
               ? page.panel.service.detailItem.artists : []
             fallbackText: page.panel.service && page.panel.service.detailItem
-              ? page.panel.service.detailItem.subtitle : ""
+              ? String(page.panel.service.detailItem.subtitle || "") : ""
             suffixText: page.panel.service && page.panel.service.detailItem
               ? Api.artistSubtitleSuffix(page.panel.service.detailItem) : ""
             color: page.panel.accent

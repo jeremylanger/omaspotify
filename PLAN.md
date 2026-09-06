@@ -284,6 +284,18 @@ Lifting pure functions into `Api.js` was considered and is not worth much on its
 only 5 functions in `Service.qml` (about 24 lines) are free of its state. The value is in
 extracting *stateful* components that avoid Quickshell types, as above.
 
+**A bug the first guard missed.** Re-verifying against a freshly restarted shell found
+`Panel.qml` still calling `contextMenuContent`, an id that moved into
+`MediaContextMenu.qml`. Arrow-key navigation inside the context menu was dead — the
+selection never moved — and it only surfaced as a `ReferenceError` in the shell log, never
+as a visible failure. `qmllint` did not report it and neither did the interface guard,
+because that guard only checked one direction: extracted files reaching into `Panel.qml`.
+It now checks the reverse too, matching `name.` usage while ignoring same-named local
+variables. Both directions are proven to fail the test when broken.
+
+The lesson for the remaining work: **after extracting a block, the file it came from is as
+likely to be broken as the block itself.**
+
 **Why the page tests are static.** A runtime test that builds each page would be better,
 but the pages use Quickshell UI types that cannot load in the offscreen test runner. That
 is the real reason `Panel.qml`, `Service.qml` and `BarWidget.qml` have no tests upstream —

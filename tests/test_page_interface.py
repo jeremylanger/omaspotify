@@ -88,6 +88,35 @@ class PageInterface(unittest.TestCase):
                 f"{page.name} must declare exactly one root id",
             )
 
+    def test_panel_does_not_reach_into_an_extracted_file_by_id(self):
+        """The reverse of the check above, and the one that was missing.
+
+        Moving a block out of Panel.qml takes its ids with it. Panel.qml kept
+        calling one of them, `contextMenuContent`, which broke keyboard
+        navigation in the context menu and only showed up in the shell log.
+
+        An id is only ever used as `name.something`, so that is what is
+        checked. A local `var name` of the same spelling is not a reference.
+        """
+        panel = strip_strings(PANEL.read_text())
+        panel_ids = set(re.findall(r"^\s*id:\s*(\w+)", panel, re.M))
+        panel_locals = set(re.findall(r"\bvar\s+(\w+)", panel))
+        # The root id each extracted file uses is a convention, not a leak.
+        roots = {"page", "popup"}
+
+        offenders = []
+        for path, _ in PARTS:
+            text = path.read_text()
+            for name in set(re.findall(r"^\s+id:\s*(\w+)", text, re.M)) - roots:
+                if name in panel_ids or name in panel_locals:
+                    continue
+                match = re.search(r"(?<![\w.])" + re.escape(name) + r"\s*\.", panel)
+                if match:
+                    line = panel[:match.start()].count(chr(10)) + 1
+                    offenders.append(f"Panel.qml line {line} uses '{name}.', "
+                                     f"which now lives in {path.name}")
+        self.assertFalse(offenders, "; ".join(sorted(set(offenders))))
+
     def test_panel_builds_every_page_it_can_show(self):
         text = PANEL.read_text()
         shown = set(re.findall(r"return\s+(\w+Page)\b", text))

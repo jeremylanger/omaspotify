@@ -10,6 +10,11 @@ Popup {
 
   property var panel: null
 
+  // The panel drives keyboard navigation through these.
+  function actionButtons() {
+    return contextMenuContent ? contextMenuContent.children : []
+  }
+
   component KeyHint: PanelKeyHint {
     panel: popup.panel
   }
