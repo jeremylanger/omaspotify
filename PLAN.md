@@ -303,9 +303,8 @@ queued track showed up in Spotify's own queue), the playlist picker, and the lyr
 throughout — Spotify's own client reports "Playing on OmaSpotify". No QML errors from this
 plugin since the fix landed.
 
-`SleepPopup.qml` is the one surface not driven by hand: its timer button sits in the footer
-and the keyboard cursor would not reach it. Its logic lives in `SleepTimer.qml`, which has
-20 unit tests, and the popup itself loads without error.
+`SleepPopup.qml` was confirmed by hand afterwards. Every extracted page and popup is now
+verified in the running app.
 
 **Why the page tests are static.** A runtime test that builds each page would be better,
 but the pages use Quickshell UI types that cannot load in the offscreen test runner. That
@@ -369,38 +368,52 @@ speculative fix could not be measured:
 
 ## Phase F — UI/UX overhaul
 
-The actual reason for the fork. Depends on Phase D.
+The reason for the fork. Ordered by how much each changes the feel per unit of work,
+based on looking at every screen running with real data.
+
+### F1 — The three things that make it feel like a terminal
+
+These are all in shared components, so one change lands on every screen at once.
+
+- [ ] **Close the horizontal dead space.** Every list row puts title and artist hard left
+      and the controls hard right, leaving roughly half the row empty. This is the single
+      biggest reason the app reads as sparse, and it is on every screen
+- [ ] **Type.** Everything is monospace. Album art is already in every list, so the
+      "text heavy" feeling comes from the typeface, not missing images. Proportional for
+      titles and names, monospace kept for durations and other figures
+- [ ] **Contrast.** The palette is one muted green at slightly different opacities, so
+      nothing leads the eye. Give primary text, secondary text and disabled state real
+      separation
+- [ ] Row height: lists show only four or five items in a half-height window
+
+### F2 — The first thing a new user sees
+
+- [ ] Redesign the login screen (`LoginPage.qml`). Observed running: the same instruction
+      appears three times (header, card heading, button); the lower third is empty because
+      the card is top-aligned rather than centred; everything is one weight and one colour,
+      so the primary button reads no louder than body text; the explanatory paragraph is
+      too low-contrast to read comfortably; the two icon rows look interactive but are not;
+      and the wordmark has no brand presence
+
+### F3 — Structure
+
+- [ ] Grid view + thumbnails for playlists and albums (GridView + Image delegates)
+- [ ] Full Now Playing view: large art, dynamic background
+- [ ] Reorganize Settings into sections: Account / Playback / Appearance / Connect.
+      It is one long scroll now, and new settings land below the fold
+- [ ] Sorting on collections (title, artist, recently added)
+
+### F4 — Theming
 
 - [ ] Theme engine: `appearance` enum (Omarchy default / Custom / Dynamic);
-      Custom = JSON palette loaded via FileView; intercept the 5 root color properties
+      Custom = JSON palette loaded via FileView; intercept the five root color properties
       in `Panel.qml`
-- [ ] Dynamic mode: derive palette from current album art (art URLs already in the API)
-- [ ] Grid view + thumbnails for playlists/albums (GridView + Image delegates) —
-      the single biggest fix for "too text-heavy"
-- [ ] Fix the horizontal dead space. Every list row puts the title and artist hard left
-      and the controls hard right, leaving roughly half the row empty. It is the main
-      reason the app reads as sparse and terminal-like
-- [ ] Reconsider the all-monospace type. Album art is already present in every list, so
-      the "text heavy" feeling comes from the typeface and spacing, not missing images.
-      A proportional face for titles with monospace kept for durations and metadata would
-      change the character of the app more than any other single edit
-- [ ] Raise contrast between primary and secondary text. The palette is currently one
-      muted green at slightly different opacities, so nothing leads the eye
-- [ ] Rows are tall and lists show only four or five items in a half-height window;
-      tighten row height or make it a setting
-- [ ] Redesign the login screen (`LoginPage.qml`) — first thing a new user sees.
-      Observed on the running app: the same instruction appears three times
-      (header, card heading, button); the lower third of the page is empty because
-      the card is top-aligned rather than centred; everything is one weight and one
-      muted colour, so the primary button reads no louder than body text; the
-      explanatory paragraph is too low-contrast to read comfortably; the two icon
-      rows look interactive but are not; and the wordmark has no brand presence.
-      Screenshot taken during Phase D verification
-- [ ] Full Now Playing view: large art, dynamic background
-- [ ] Reorganize Settings into real sections: Account / Playback / Appearance / Connect
-- [ ] Sorting on collections (title, artist, recently added)
-- [ ] Right-click context menus (add to playlist, radio, copy link)
+- [ ] Dynamic mode: derive the palette from the current album art
+
+### F5 — Smaller wins
+
 - [ ] Queue drag-to-reorder
+- [ ] Right-click context menus (the keyboard path already works)
 - [ ] Sleep timer polish
 
 ## Phase G — Differentiators
