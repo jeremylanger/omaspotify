@@ -82,6 +82,8 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.jeremylanger.omaspotify"
+  readonly property string appName: manifest && manifest.name
+    ? String(manifest.name) : "OmaSpotify"
   readonly property string lyricsRequestKey: "spotify-panel-lyrics"
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background
@@ -2521,19 +2523,11 @@ Item {
 
                 Text {
                   width: parent.width
-                  text: "Music"
+                  text: root.appName
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.subtitle
                   font.bold: true
-                  elide: Text.ElideRight
-                }
-                Text {
-                  width: parent.width
-                  text: "for Spotify"
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
                   elide: Text.ElideRight
                 }
               }

@@ -388,6 +388,18 @@ The actual reason for the fork. Depends on Phase D.
 
 ---
 
+## Appendix: the dev loop — changes do not hot-reload
+
+`install-local.sh` links the plugin directory to this checkout as a **symlink**. Omarchy's
+file watcher does not follow it, so editing a file here changes nothing in the running
+shell — and `omarchy-shell shell rescanPlugins` does not recompile QML either. The app
+keeps running the code it loaded at startup.
+
+**After any edit, run `omarchy restart shell`.** Verifying against a running instance
+without it means verifying stale code. This was discovered late: several live checks
+earlier in the rebuild may have been against the previous build, though a full restart
+afterwards loaded every extracted file with zero QML errors, which covers them.
+
 ## Appendix: two engines
 
 The plugin today ships **two playback engines**:
