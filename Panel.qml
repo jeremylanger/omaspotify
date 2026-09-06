@@ -2008,7 +2008,7 @@ Item {
       : "Songs, artists, albums, playlists, podcasts and audiobooks"
     if (currentTab === "home") return "Recently played and your personal favorites"
     if (currentTab === "discover") return "Personal mixes and fresh music from Spotify"
-    if (currentTab === "library") return "Songs, albums, artists, podcasts and audiobooks"
+    if (currentTab === "library") return ""
     if (currentTab === "playlists") return "Your Spotify playlists"
     if (currentTab === "queue") return "What plays next"
     if (currentTab === "devices") return "Speakers and players"
@@ -2493,9 +2493,8 @@ Item {
                 : Math.min(Style.space(214), Math.max(Style.space(176), workspace.width * 0.225)))
               : 0
             height: parent.height
-            radius: Style.cornerRadius
-            color: Style.normalFillFor(root.foreground, root.accent)
-            borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
+            color: "transparent"
+            borderSpec: Border.none()
 
             Row {
               id: brandRow
@@ -2503,8 +2502,8 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
-              anchors.margins: visible ? Style.space(11) : 0
-              height: visible ? Style.space(42) : 0
+              anchors.margins: visible ? Style.space(2) : 0
+              height: visible ? Style.space(24) : 0
               spacing: Style.space(9)
 
               Text {
@@ -2538,7 +2537,8 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: brandRow.visible ? brandRow.bottom : parent.top
-              anchors.margins: Style.space(8)
+              anchors.margins: Style.space(2)
+              anchors.topMargin: Style.space(8)
               spacing: Style.space(2)
 
               PanelSeparator {
@@ -2588,19 +2588,15 @@ Item {
 
             Text {
               id: playlistShortcutsHeading
-              visible: !root.compactWidth
+              visible: false
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: primaryNavigation.bottom
-              anchors.leftMargin: Style.space(13)
-              anchors.rightMargin: Style.space(13)
-              anchors.topMargin: Style.space(9)
-              height: visible ? implicitHeight : 0
-              text: "YOUR LIBRARY"
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
+              anchors.leftMargin: Style.space(2)
+              anchors.rightMargin: Style.space(2)
+              anchors.topMargin: Style.space(8)
+              height: 0
+              text: ""
             }
 
             Column {
@@ -2609,8 +2605,8 @@ Item {
               anchors.right: parent.right
               anchors.top: playlistShortcutsHeading.visible
                 ? playlistShortcutsHeading.bottom : primaryNavigation.bottom
-              anchors.leftMargin: Style.space(8)
-              anchors.rightMargin: Style.space(8)
+              anchors.leftMargin: Style.space(2)
+              anchors.rightMargin: Style.space(2)
               anchors.topMargin: Style.space(6)
               spacing: Style.space(2)
 
@@ -2682,7 +2678,7 @@ Item {
               anchors.right: parent.right
               anchors.top: libraryNavigation.bottom
               anchors.bottom: setupNavButton.top
-              anchors.margins: Style.space(8)
+              anchors.margins: Style.space(2)
               model: root.service ? root.service.sidebarPlaylists() : []
               clip: true
               spacing: Style.space(1)
@@ -2751,7 +2747,7 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.bottom: parent.bottom
-              anchors.margins: Style.space(8)
+              anchors.margins: Style.space(2)
               text: root.compactWidth ? "" : "Settings"
               iconText: root.service && root.service.auth.loggedIn ? "󰀄" : "󰒓"
               foreground: root.foreground
@@ -2778,7 +2774,7 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
-              height: Style.space(52)
+              height: Math.max(closeButton.implicitHeight, titleColumn.implicitHeight)
               spacing: Style.space(5)
 
               Button {
@@ -2796,6 +2792,7 @@ Item {
               }
 
               Column {
+                id: titleColumn
                 width: Math.max(80, parent.width
                   - (backButton.visible ? backButton.width + parent.spacing : 0)
                   - (shortcutHintsDismissButton.visible
@@ -3046,7 +3043,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: playerFooter.top
-          anchors.bottomMargin: Style.space(10)
+          anchors.bottomMargin: Style.space(4)
           foreground: root.foreground
         }
 
@@ -3056,15 +3053,16 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: parent.bottom
-          height: visible ? Style.space(root.compactHeight ? 88 : 104) : 0
-          radius: Style.cornerRadius
-          color: Style.normalFillFor(root.foreground, root.accent)
-          borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
+          height: visible ? Style.space(root.compactHeight ? 72 : 84) : 0
+          color: "transparent"
+          borderSpec: Border.none()
 
           Row {
             id: playerRow
             anchors.fill: parent
-            anchors.margins: Style.space(10)
+            anchors.margins: Style.space(2)
+            anchors.leftMargin: 0
+            anchors.rightMargin: 0
             spacing: Style.space(12)
 
             Item {
@@ -3527,17 +3525,28 @@ Item {
                 }
               }
 
-              Text {
+              Row {
                 width: parent.width
+                layoutDirection: Qt.RightToLeft
+                spacing: Style.space(4)
                 visible: root.service && root.service.playbackDeviceName !== ""
-                text: root.service
-                  ? ((root.service.playing ? "Playing on " : "Connected to ")
-                    + root.service.playbackDeviceName)
-                  : ""
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.service ? root.service.playbackDeviceName : ""
+                  color: root.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "󰦧"
+                  color: root.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
               }
             }
           }
