@@ -259,7 +259,14 @@ Devices, Search, Settings, artist detail, and login. All render with real data a
 **zero QML errors**. The shortcut-hints overlay and the keyboard-shortcuts popup both work,
 which exercises the extracted `PanelKeyHint.qml` and `ShortcutModifiers.qml` directly.
 Devices lists the original plugin as a separate Connect target, confirming the Phase C
-identity split. Screenshots captured for the Phase F redesign.
+identity split. Local playback runs through our own rebuilt backend — the player bar reads
+"Playing on OmaSpotify" — so the Phase C rename holds end to end, binary included.
+
+After the popups moved out, `ShortcutHelpPopup`, `MediaContextMenu` and `PlaylistPicker`
+were opened in the running app and render correctly, including the key-hint badges inside
+the context menu. `LyricsInstallPopup`, `CreatePlaylistPopup` and `SleepPopup` are verified
+only statically so far; they are structurally identical to the three that were checked.
+Screenshots captured for the Phase F redesign.
 
 **Why the page tests are static.** A runtime test that builds each page would be better,
 but the pages use Quickshell UI types that cannot load in the offscreen test runner. That
