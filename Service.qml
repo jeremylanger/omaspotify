@@ -360,11 +360,8 @@ Item {
   property bool playlistConversionBusy: false
   property string pendingPlaylistName: ""
 
-  property string sleepMode: "off"
-  property double sleepEndsAt: 0
-  property string sleepTrackUri: ""
-  readonly property bool sleepActive: sleepMode !== "off"
-  property int sleepRemainingSeconds: 0
+  readonly property bool sleepActive: sleepTimer.active
+  readonly property int sleepRemainingSeconds: sleepTimer.remainingSeconds
 
   property string activeView: "search"
   property bool playlistsLoaded: false
@@ -3311,90 +3308,23 @@ Item {
   }
 
   function setSleepMinutes(minutes) {
-    var value = Math.max(1, Math.min(720, Math.floor(Number(minutes) || 0)))
-    sleepContextTimer.stop()
-    sleepMode = "minutes"
-    sleepEndsAt = Date.now() + value * 60000
-    sleepRemainingSeconds = value * 60
-    sleepTrackUri = ""
-    scheduleSleepDeadline()
-    succeed("Sleep timer set for " + value + " minutes")
+    sleepTimer.setMinutes(minutes)
   }
 
   function sleepAfterTrack() {
-    if (!currentUri || !playing) {
-      fail("Play something before setting an end-of-track timer")
-      return
-    }
-    sleepDeadlineTimer.stop()
-    sleepMode = "track"
-    sleepTrackUri = currentUri
-    sleepEndsAt = 0
-    sleepRemainingSeconds = 0
-    succeed("Playback will pause after this item")
+    sleepTimer.afterTrack()
   }
 
   function sleepAfterContext() {
-    if (!playing) {
-      fail("Play something before setting an end-of-context timer")
-      return
-    }
-    sleepDeadlineTimer.stop()
-    sleepMode = "context"
-    sleepTrackUri = ""
-    sleepEndsAt = 0
-    sleepRemainingSeconds = 0
-    succeed("Playback will pause after this album or playlist")
+    sleepTimer.afterContext()
   }
 
   function cancelSleepTimer(showStatus) {
-    sleepDeadlineTimer.stop()
-    sleepMode = "off"
-    sleepEndsAt = 0
-    sleepTrackUri = ""
-    sleepRemainingSeconds = 0
-    sleepContextTimer.stop()
-    if (showStatus !== false) succeed("Sleep timer cancelled")
-  }
-
-  function finishSleepTimer() {
-    if (!sleepActive) return
-    if (playing) togglePlayback()
-    cancelSleepTimer(false)
-    succeed("Sleep timer finished")
-  }
-
-  function updateSleepCountdown() {
-    if (sleepMode !== "minutes") {
-      sleepRemainingSeconds = 0
-      return
-    }
-    sleepRemainingSeconds = Api.deadlineRemainingSeconds(sleepEndsAt,
-      Date.now())
-  }
-
-  function scheduleSleepDeadline() {
-    sleepDeadlineTimer.stop()
-    if (sleepMode !== "minutes") return
-    var remaining = sleepEndsAt - Date.now()
-    if (remaining <= 0) {
-      updateSleepCountdown()
-      finishSleepTimer()
-      return
-    }
-    sleepDeadlineTimer.interval = Math.max(1, Math.ceil(remaining))
-    sleepDeadlineTimer.restart()
+    sleepTimer.cancel(showStatus)
   }
 
   function sleepStatusText() {
-    if (sleepMode === "minutes") {
-      var minutes = Math.floor(sleepRemainingSeconds / 60)
-      var seconds = sleepRemainingSeconds % 60
-      return "Sleep in " + minutes + ":" + (seconds < 10 ? "0" : "") + seconds
-    }
-    if (sleepMode === "track") return "Sleep after this item"
-    if (sleepMode === "context") return "Sleep after this album or playlist"
-    return "Sleep timer"
+    return sleepTimer.statusText()
   }
 
   function addToQueue(item) {
@@ -3629,15 +3559,8 @@ Item {
   }
 
   onPlayingChanged: noteActivity()
-  onPlaybackStateChanged: {
-    if ((sleepMode === "context" || sleepMode === "track")
-        && playbackState === MprisPlaybackState.Stopped) sleepContextTimer.restart()
-    else sleepContextTimer.stop()
-  }
-  onCurrentUriChanged: {
-    if (sleepMode === "track" && sleepTrackUri && currentUri
-        && currentUri !== sleepTrackUri) finishSleepTimer()
-  }
+  onPlaybackStateChanged: sleepTimer.notePlaybackStateChanged(playbackState)
+  onCurrentUriChanged: sleepTimer.noteCurrentUriChanged(currentUri)
   onCurrentTrackItemUriChanged: syncCurrentTrackSaved(false)
   onLyricsPluginAvailabilityChanged: resumeLyricsInstallIntent()
   onShellChanged: settingsSync.restart()
@@ -3645,7 +3568,7 @@ Item {
     if (uiVisible) {
       ensureVisibleLocalReceiver()
       syncCurrentTrackSaved(true)
-      updateSleepCountdown()
+      sleepTimer.updateCountdown()
     }
     else cancelVisibleLocalDeviceRefresh()
   }
@@ -4000,35 +3923,12 @@ Item {
     }
   }
 
-  Timer {
-    id: sleepDeadlineTimer
-    repeat: false
-    onTriggered: {
-      root.updateSleepCountdown()
-      if (root.sleepRemainingSeconds <= 0) root.finishSleepTimer()
-      else root.scheduleSleepDeadline()
-    }
-  }
 
-  Timer {
-    id: sleepCountdown
-    interval: 1000
-    repeat: true
-    running: root.sleepMode === "minutes" && root.uiVisible
-    onRunningChanged: if (running) root.updateSleepCountdown()
-    onTriggered: {
-      root.updateSleepCountdown()
-      if (root.sleepRemainingSeconds <= 0) root.finishSleepTimer()
-    }
-  }
 
-  Timer {
-    id: sleepContextTimer
-    interval: 1800
-    repeat: false
-    onTriggered: if ((root.sleepMode === "context" || root.sleepMode === "track")
-        && root.playbackState === MprisPlaybackState.Stopped)
-      root.finishSleepTimer()
+
+  SleepTimer {
+    id: sleepTimer
+    service: root
   }
 
   AuthManager {
