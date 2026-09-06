@@ -26,3 +26,5 @@ Changes below start from the fork point. For the history of the original plugin,
 - Share the keyboard modifier rules between the full player and the mini-player.
 - Moved the six popups out of Panel.qml as well, taking it from 6,636 to 3,638
   lines overall.
+- Moved the sleep timer and the lyrics-plugin flow out of Service.qml into their
+  own files.
