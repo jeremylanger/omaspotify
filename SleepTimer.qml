@@ -1,11 +1,11 @@
 import QtQuick
-import Quickshell.Services.Mpris
 
 import "Api.js" as Api
 
 // Pauses playback after a delay, after the current item, or at the end of the
 // current album or playlist. Owns its own countdown so the service does not
-// have to.
+// have to. Deliberately free of Quickshell types so it can be unit tested:
+// the service decides what counts as stopped and passes a plain boolean.
 Item {
   id: sleep
 
@@ -110,9 +110,8 @@ Item {
   }
 
   // The service forwards its playback signals here.
-  function notePlaybackStateChanged(playbackState) {
-    if ((mode === "context" || mode === "track")
-        && playbackState === MprisPlaybackState.Stopped) contextTimer.restart()
+  function noteStopped(stopped) {
+    if ((mode === "context" || mode === "track") && stopped) contextTimer.restart()
     else contextTimer.stop()
   }
 

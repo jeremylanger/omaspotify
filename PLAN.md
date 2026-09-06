@@ -268,6 +268,22 @@ the context menu. `LyricsInstallPopup`, `CreatePlaylistPopup` and `SleepPopup` a
 only statically so far; they are structurally identical to the three that were checked.
 Screenshots captured for the Phase F redesign.
 
+**How to make Service.qml testable — the key constraint.** Quickshell is statically linked
+into its own binary; there is no loadable plugin, so `qmltestrunner` can never instantiate
+`Mpris`, `Process`, `IpcHandler` or `FileView`. That is the real reason the three biggest
+files have no tests, and no amount of test-writing changes it directly.
+
+What does work: **keep Quickshell types at the edges.** `SleepTimer.qml` needed Quickshell
+for exactly one thing — comparing a playback state to `MprisPlaybackState.Stopped`. Moving
+that comparison up into `Service.qml` and passing a plain boolean made the whole component
+pure QtQuick, and it now has **20 unit tests**. Apply the same rule to every future
+extraction: the service owns the Quickshell objects, the extracted component owns the
+logic and takes plain values.
+
+Lifting pure functions into `Api.js` was considered and is not worth much on its own —
+only 5 functions in `Service.qml` (about 24 lines) are free of its state. The value is in
+extracting *stateful* components that avoid Quickshell types, as above.
+
 **Why the page tests are static.** A runtime test that builds each page would be better,
 but the pages use Quickshell UI types that cannot load in the offscreen test runner. That
 is the real reason `Panel.qml`, `Service.qml` and `BarWidget.qml` have no tests upstream —

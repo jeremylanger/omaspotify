@@ -3389,7 +3389,8 @@ Item {
   }
 
   onPlayingChanged: noteActivity()
-  onPlaybackStateChanged: sleepTimer.notePlaybackStateChanged(playbackState)
+  onPlaybackStateChanged: sleepTimer.noteStopped(
+    playbackState === MprisPlaybackState.Stopped)
   onCurrentUriChanged: sleepTimer.noteCurrentUriChanged(currentUri)
   onCurrentTrackItemUriChanged: syncCurrentTrackSaved(false)
   onShellChanged: settingsSync.restart()
