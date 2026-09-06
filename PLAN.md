@@ -251,6 +251,14 @@ inside `Panel.qml` (`window`, `unifiedSearchField`), and three pages had their o
 id that collided with the new one. `qmllint` flagged one of the four. The rest were found
 by a static check, which is now `tests/test_page_interface.py`.
 
+**Verified in the running app.** Installed alongside the original plugin and exercised
+every screen with a live Spotify session: For you, Discover, Library, Playlists, Queue,
+Devices, Search, Settings, artist detail, and login. All render with real data and produce
+**zero QML errors**. The shortcut-hints overlay and the keyboard-shortcuts popup both work,
+which exercises the extracted `PanelKeyHint.qml` and `ShortcutModifiers.qml` directly.
+Devices lists the original plugin as a separate Connect target, confirming the Phase C
+identity split. Screenshots captured for the Phase F redesign.
+
 **Why the page tests are static.** A runtime test that builds each page would be better,
 but the pages use Quickshell UI types that cannot load in the offscreen test runner. That
 is the real reason `Panel.qml`, `Service.qml` and `BarWidget.qml` have no tests upstream —
@@ -287,6 +295,17 @@ The actual reason for the fork. Depends on Phase D.
 - [ ] Dynamic mode: derive palette from current album art (art URLs already in the API)
 - [ ] Grid view + thumbnails for playlists/albums (GridView + Image delegates) —
       the single biggest fix for "too text-heavy"
+- [ ] Fix the horizontal dead space. Every list row puts the title and artist hard left
+      and the controls hard right, leaving roughly half the row empty. It is the main
+      reason the app reads as sparse and terminal-like
+- [ ] Reconsider the all-monospace type. Album art is already present in every list, so
+      the "text heavy" feeling comes from the typeface and spacing, not missing images.
+      A proportional face for titles with monospace kept for durations and metadata would
+      change the character of the app more than any other single edit
+- [ ] Raise contrast between primary and secondary text. The palette is currently one
+      muted green at slightly different opacities, so nothing leads the eye
+- [ ] Rows are tall and lists show only four or five items in a half-height window;
+      tighten row height or make it a setting
 - [ ] Redesign the login screen (`LoginPage.qml`) — first thing a new user sees.
       Observed on the running app: the same instruction appears three times
       (header, card heading, button); the lower third of the page is empty because
