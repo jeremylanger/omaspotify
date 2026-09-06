@@ -32,11 +32,11 @@ var DISCOVERY_SEARCHES = [
   "Fresh Finds"
 ]
 
-// spotifyd's software mixer maps its normalized volume over a 60 dB
-// logarithmic range. Convert that control to a cubic slider over the same
-// range, matching the gentler taper used by common desktop audio mixers.
+// The playback engine's software mixer spreads its volume over a 60 dB
+// logarithmic range. Convert that to a cubic slider over the same range,
+// matching the gentler taper used by common desktop audio mixers.
 // Zero remains a true mute in both directions.
-var SPOTIFYD_CUBIC_FLOOR = 0.1
+var ENGINE_CUBIC_FLOOR = 0.1
 
 function clampUnit(value) {
   return Math.max(0, Math.min(1, Number(value) || 0))
@@ -48,19 +48,19 @@ function normalizeVolumePercent(value) {
   return isFinite(volume) ? Math.max(0, Math.min(100, volume)) : null
 }
 
-function spotifydVolumeToSlider(value) {
+function engineVolumeToSlider(value) {
   var volume = clampUnit(value)
   if (volume <= 0) return 0
   var cubicRoot = Math.pow(10, volume - 1)
-  return clampUnit((cubicRoot - SPOTIFYD_CUBIC_FLOOR)
-    / (1 - SPOTIFYD_CUBIC_FLOOR))
+  return clampUnit((cubicRoot - ENGINE_CUBIC_FLOOR)
+    / (1 - ENGINE_CUBIC_FLOOR))
 }
 
-function sliderToSpotifydVolume(value) {
+function sliderToEngineVolume(value) {
   var slider = clampUnit(value)
   if (slider <= 0) return 0
-  var cubicRoot = SPOTIFYD_CUBIC_FLOOR
-    + (1 - SPOTIFYD_CUBIC_FLOOR) * slider
+  var cubicRoot = ENGINE_CUBIC_FLOOR
+    + (1 - ENGINE_CUBIC_FLOOR) * slider
   return clampUnit(1 + Math.log(cubicRoot) / Math.LN10)
 }
 
@@ -588,7 +588,7 @@ function backendLoadFields(body) {
 }
 
 // Preserve Spotify's current playback target unless the user explicitly chose
-// another device in this app. The local spotifyd player is only the fallback
+// another device in this app. The local engine player is only the fallback
 // when Spotify has no active device. Keeping a restricted device here avoids
 // silently moving playback locally; Spotify can report the unsupported action.
 function preferredPlaybackDevice(devices, selectedId, explicitSelection, currentDevice) {
@@ -865,9 +865,9 @@ function spotifyTrackId(value) {
 }
 
 // Playback from another Spotify Connect device already carries a normalized
-// item. Local spotifyd playback may expose only MPRIS metadata, so synthesize
+// item. Local playback may expose only MPRIS metadata, so synthesize
 // the small track shape needed by library actions in that case. A matching
-// episode must not be mistaken for a track when spotifyd's object-path
+// episode must not be mistaken for a track when the engine's object-path
 // fallback supplied its id.
 function currentPlaybackTrack(trackId, remoteTrack, title, artist, album,
     coverUrl, durationSeconds, externalUrl) {

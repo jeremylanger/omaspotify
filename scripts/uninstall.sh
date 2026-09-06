@@ -47,4 +47,4 @@ if command -v rg >/dev/null 2>&1 && [[ -d $hypr_config ]] \
 fi
 
 echo "Omarchy Spotify's plugin data and runtime have been completely uninstalled."
-echo "External source checkouts, other plugins, and the spotifyd package were left alone."
+echo "External source checkouts and other plugins were left alone."

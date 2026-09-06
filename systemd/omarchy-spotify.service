@@ -3,7 +3,6 @@ Description=Omarchy Spotify plugin playback backend
 Documentation=https://github.com/stappmus/QuickshellSpotify
 After=graphical-session.target sound.target
 Wants=sound.target
-Conflicts=omarchy-spotifyd.service
 
 [Service]
 Type=simple

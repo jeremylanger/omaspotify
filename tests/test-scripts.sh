@@ -139,7 +139,7 @@ mkdir -p "$test_root/config/omarchy-spotify"
 cp -- "$source_root/config/spotifyd.conf" "$test_root/config/omarchy-spotify/spotifyd.conf"
 printf '%s\n' 'device = "legacy_output"' >>"$test_root/config/omarchy-spotify/spotifyd.conf"
 printf '%s\n%s\n' "Desk speakers" 320 |
-  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-spotifyd.sh"
+  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
 grep -qx 'device_name = "Desk speakers"' "$test_root/config/omarchy-spotify/spotifyd.conf"
 grep -qx 'bitrate = 320' "$test_root/config/omarchy-spotify/spotifyd.conf"
 grep -qx 'no_audio_cache = false' "$test_root/config/omarchy-spotify/spotifyd.conf"
@@ -148,26 +148,26 @@ grep -qx 'max_cache_size = 1000000000' "$test_root/config/omarchy-spotify/spotif
 grep -qx 'autoplay = true' "$test_root/config/omarchy-spotify/spotifyd.conf"
 
 printf '%s\n' "Renamed speakers" |
-  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-spotifyd.sh"
+  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
 grep -qx 'device_name = "Renamed speakers"' "$test_root/config/omarchy-spotify/spotifyd.conf"
 grep -qx 'bitrate = 320' "$test_root/config/omarchy-spotify/spotifyd.conf"
 ! grep -q '^device[[:space:]]*=' "$test_root/config/omarchy-spotify/spotifyd.conf"
 
 printf '%s\n%s\n\n' "Desk speakers" 96 |
-  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-spotifyd.sh"
+  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
 grep -qx 'bitrate = 96' "$test_root/config/omarchy-spotify/spotifyd.conf"
 ! grep -q '^device[[:space:]]*=' "$test_root/config/omarchy-spotify/spotifyd.conf"
 
 set +e
 printf '%s\n' 'invalid"name' |
-  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-spotifyd.sh"
+  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
 invalid_status=$?
 set -e
 [[ $invalid_status -eq 3 ]]
 
 # Exercise setup and removal entirely inside the temporary tree. The mock
-# spotifyd/systemctl binaries prevent package, service, keyring, or user-config
-# changes while still covering the scripts' real file permissions and paths.
+# binaries prevent package, service, keyring, or user-config changes while
+# still covering the scripts' real file permissions and paths.
 mock_bin="$test_root/mock-bin"
 runtime_config="$test_root/runtime-config"
 runtime_cache="$test_root/runtime-cache"
@@ -182,7 +182,6 @@ omarchy_log="$test_root/omarchy.log"
 mkdir -p "$mock_bin" "$runtime_config" "$runtime_cache" "$runtime_state" \
   "$runtime_session" "$runtime_backend" "$runtime_home"
 
-printf '%s\n' '#!/bin/sh' 'exit 0' >"$mock_bin/spotifyd"
 printf '%s\n' \
   '#!/bin/sh' \
   'mkdir -p "${CARGO_TARGET_DIR:?}/release"' \
@@ -207,7 +206,7 @@ printf '%s\n' \
   '  rm -f -- "$HOME/.config/omarchy/plugins/quickshell.spotify"' \
   'fi' \
   'exit 0' >"$mock_bin/omarchy"
-chmod 755 "$mock_bin/cargo" "$mock_bin/spotifyd" "$mock_bin/systemctl" \
+chmod 755 "$mock_bin/cargo" "$mock_bin/systemctl" \
   "$mock_bin/secret-tool" "$mock_bin/omarchy"
 
 [[ -x $source_root/scripts/spotify-connect-device.py ]]
@@ -219,11 +218,12 @@ XDG_CONFIG_HOME="$runtime_config" \
 XDG_CACHE_HOME="$runtime_cache" \
 XDG_STATE_HOME="$runtime_state" \
 OMARCHY_SPOTIFY_RUNTIME_DIR="$runtime_backend" \
-OMARCHY_SPOTIFY_SKIP_BACKEND_BUILD=1 \
+CARGO_TARGET_DIR="$mock_target" \
+OMARCHY_SPOTIFY_BUILD_FROM_SOURCE=1 \
   "$source_root/scripts/setup.sh" --device-name "Test speakers" >/dev/null
 
 runtime_spotify_config="$runtime_config/omarchy-spotify/spotifyd.conf"
-runtime_unit="$runtime_config/systemd/user/omarchy-spotifyd.service"
+runtime_unit="$runtime_config/systemd/user/omarchy-spotify.service"
 [[ -f $runtime_spotify_config && -f $runtime_unit ]]
 [[ $(stat -c '%a' "$runtime_spotify_config") == 600 ]]
 [[ $(stat -c '%a' "$runtime_unit") == 644 ]]
@@ -243,14 +243,14 @@ OMARCHY_SPOTIFY_RUNTIME_DIR="$runtime_backend" \
 find "$runtime_config" -maxdepth 1 -type d -name 'omarchy-spotify.bak.*' \
   | grep -q .
 
-# The in-app first-run wrapper must complete the unprivileged setup directly
-# when spotifyd is already present.
+# The in-app first-run wrapper must complete the unprivileged setup directly.
 PATH="$mock_bin:$PATH" \
 XDG_CONFIG_HOME="$runtime_config" \
 XDG_CACHE_HOME="$runtime_cache" \
 XDG_STATE_HOME="$runtime_state" \
 OMARCHY_SPOTIFY_RUNTIME_DIR="$runtime_backend" \
-OMARCHY_SPOTIFY_SKIP_BACKEND_BUILD=1 \
+CARGO_TARGET_DIR="$mock_target" \
+OMARCHY_SPOTIFY_BUILD_FROM_SOURCE=1 \
   "$source_root/scripts/setup-playback.sh" >/dev/null
 [[ -f $runtime_spotify_config && -f $runtime_unit ]]
 grep -qx 'device_name = "Omarchy Spotify"' "$runtime_spotify_config"
@@ -285,11 +285,14 @@ installed_hash=$(sha256sum -- "$runtime_backend/omarchy-spotify-backend")
 printf '%s\n' 'stale backend' >"$runtime_backend/omarchy-spotify-backend"
 chmod 755 "$runtime_backend/omarchy-spotify-backend"
 printf '%s\n' 'stale unit' >"$runtime_backend_unit"
-selected_unit=$(PATH="$mock_bin:$PATH" \
+set +e
+PATH="$mock_bin:$PATH" \
   XDG_CONFIG_HOME="$runtime_config" \
   OMARCHY_SPOTIFY_RUNTIME_DIR="$runtime_backend" \
-  "$source_root/scripts/playback-runtime.sh" unit)
-[[ $selected_unit == omarchy-spotifyd.service ]]
+  "$source_root/scripts/playback-runtime.sh" unit >/dev/null 2>&1
+stale_unit_status=$?
+set -e
+[[ $stale_unit_status -ne 0 ]]
 
 : >"$systemctl_log"
 PATH="$mock_bin:$PATH" \
@@ -349,7 +352,6 @@ TEST_SYSTEMCTL_LOG="$systemctl_log" \
 [[ ! -e $runtime_session/omarchy-spotify ]]
 [[ ! -e $runtime_backend ]]
 grep -qx -- '--user disable --now omarchy-spotify.service' "$systemctl_log"
-grep -qx -- '--user disable --now omarchy-spotifyd.service' "$systemctl_log"
 grep -q 'clear service quickshell-spotify kind refresh-token' "$secret_log"
 
 set +e
@@ -417,7 +419,7 @@ XDG_STATE_HOME="$runtime_state" \
 PATH="$mock_bin:$PATH" \
 XDG_CACHE_HOME="$runtime_cache" \
 XDG_STATE_HOME="$runtime_state" \
-  "$source_root/scripts/spotifyd-logout.sh"
+  "$source_root/scripts/playback-logout.sh"
 [[ ! -e $runtime_state/omarchy-spotify/oauth/credentials.json ]]
 [[ ! -e $runtime_cache/spotifyd/oauth/credentials.json ]]
 if XDG_CACHE_HOME="$runtime_cache" XDG_STATE_HOME="$runtime_state" \
@@ -429,7 +431,7 @@ fi
 set +e
 PATH="$mock_bin:$PATH" \
 XDG_CACHE_HOME="relative-cache" \
-  "$source_root/scripts/spotifyd-logout.sh" >/dev/null 2>&1
+  "$source_root/scripts/playback-logout.sh" >/dev/null 2>&1
 unsafe_logout_status=$?
 set -e
 [[ $unsafe_logout_status -eq 3 ]]
@@ -464,22 +466,18 @@ PATH="$mock_bin:$PATH" \
   "$source_root/scripts/return-from-auth.sh"
 ! grep -q 'send_shortcut' "$handoff_hypr_log"
 
-grep -qx 'umask 077' "$source_root/scripts/spotifyd-auth.sh"
+grep -qx 'umask 077' "$source_root/scripts/playback-auth.sh"
 [[ -x $source_root/scripts/setup-playback.sh ]]
 [[ -x $source_root/scripts/backend-source-id.sh ]]
 [[ -x $source_root/scripts/uninstall.sh ]]
 grep -q 'remove-runtime.sh.*--purge' "$source_root/scripts/uninstall.sh"
 grep -q 'omarchy plugin remove quickshell.spotify --yes' "$source_root/scripts/uninstall.sh"
 grep -q '^## Remove it completely$' "$source_root/README.md"
-grep -q 'pkexec /usr/bin/pacman -S --needed --noconfirm spotifyd' \
-  "$source_root/scripts/setup-playback.sh"
-! grep -q 'sudo' "$source_root/scripts/setup-playback.sh"
-grep -q 'exec /usr/bin/spotifyd authenticate' \
-  "$source_root/scripts/spotifyd-auth.sh"
-grep -q 'omarchy-spotify-backend' "$source_root/scripts/spotifyd-auth.sh"
+! grep -q 'sudo\|pkexec' "$source_root/scripts/setup-playback.sh"
+grep -q 'omarchy-spotify-backend' "$source_root/scripts/playback-auth.sh"
 grep -q -- '--config-path "$config_root/omarchy-spotify/spotifyd.conf"' \
-  "$source_root/scripts/spotifyd-auth.sh"
-grep -q -- '--oauth-port 8000' "$source_root/scripts/spotifyd-auth.sh"
+  "$source_root/scripts/playback-auth.sh"
+grep -q -- '--oauth-port 8000' "$source_root/scripts/playback-auth.sh"
 grep -q 'property string clientId: "d420a117a32841c2b3474932e49fb54b"' \
   "$source_root/AuthManager.qml"
 grep -q 'readonly property string redirectUri: "http://127.0.0.1:"' \
@@ -516,8 +514,7 @@ grep -qx 'section=left' "$source_root/scripts/install-local.sh"
 grep -qx 'bitrate = 320' "$source_root/config/spotifyd.conf"
 grep -qx 'no_audio_cache = false' "$source_root/config/spotifyd.conf"
 grep -qx 'max_cache_size = 1000000000' "$source_root/config/spotifyd.conf"
-grep -qx 'Conflicts=omarchy-spotifyd.service' \
-  "$source_root/systemd/omarchy-spotify.service"
+! grep -q 'Conflicts=' "$source_root/systemd/omarchy-spotify.service"
 grep -qx 'Environment=PULSE_LATENCY_MSEC=30' \
   "$source_root/systemd/omarchy-spotify.service"
 grep -qx 'Environment=TOKIO_WORKER_THREADS=2' \

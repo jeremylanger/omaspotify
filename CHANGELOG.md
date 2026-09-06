@@ -11,3 +11,8 @@ Changes below start from the fork point. For the history of the original plugin,
 - Shrank the documentation screenshots from 3200px to 1600px wide.
 - Lint every source file by glob so a new one is never missed.
 - Run the test suite in CI on every push and pull request.
+- Removed the legacy spotifyd playback engine. The Rust backend is now the only
+  engine, so there is no unit probe, no distro package fallback, and no second
+  set of volume and position handling.
+- Renamed the shared playback helpers off the spotifyd name and renamed the
+  engine discovery and volume helpers to say what they actually do.

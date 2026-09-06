@@ -16,9 +16,8 @@ cache_root=${XDG_CACHE_HOME:-"$HOME/.cache"}
 state_root=${XDG_STATE_HOME:-"$HOME/.local/state"}
 session_runtime_root=${XDG_RUNTIME_DIR:-/tmp}
 backend_unit_file="$config_root/systemd/user/omarchy-spotify.service"
-fallback_unit_file="$config_root/systemd/user/omarchy-spotifyd.service"
 config_dir="$config_root/omarchy-spotify"
-cache_dir="$cache_root/spotifyd"
+legacy_cache_dir="$cache_root/spotifyd"
 build_cache_dir="$cache_root/omarchy-spotify"
 state_dir="$state_root/omarchy-spotify"
 session_runtime_dir="$session_runtime_root/omarchy-spotify"
@@ -47,20 +46,17 @@ if [[ ${runtime_dir##*/} == omarchy-spotify ]]; then
   runtime_dir_is_dedicated=1
 fi
 
-for unit_name in omarchy-spotify.service omarchy-spotifyd.service; do
-  systemctl --user disable --now "$unit_name" >/dev/null 2>&1 || true
-done
-rm -f -- "$backend_unit_file" "$fallback_unit_file" "$backend_binary" \
+systemctl --user disable --now omarchy-spotify.service >/dev/null 2>&1 || true
+rm -f -- "$backend_unit_file" "$backend_binary" \
   "$backend_source_id_file" "$backend_binary_hash_file" "$backend_origin_file"
 systemctl --user daemon-reload
-systemctl --user reset-failed omarchy-spotify.service omarchy-spotifyd.service \
-  >/dev/null 2>&1 || true
+systemctl --user reset-failed omarchy-spotify.service >/dev/null 2>&1 || true
 
 if [[ -d $config_dir ]]; then
   if (( purge )); then
     [[ $config_dir == "$config_root/omarchy-spotify" ]] || exit 3
     rm -rf -- "$config_dir"
-    echo "Removed spotifyd configuration."
+    echo "Removed playback configuration."
   else
     backup="${config_dir}.bak.$(date -u +%Y%m%d%H%M%S)"
     mv -- "$config_dir" "$backup"
@@ -69,10 +65,11 @@ if [[ -d $config_dir ]]; then
 fi
 
 if (( purge )); then
-  if [[ -d $cache_dir ]]; then
-    [[ $cache_dir == "$cache_root/spotifyd" ]] || exit 3
-    rm -rf -- "$cache_dir"
-    echo "Removed spotifyd cached credentials and audio."
+  # Releases before 1.0.3 cached playback credentials and audio here.
+  if [[ -d $legacy_cache_dir ]]; then
+    [[ $legacy_cache_dir == "$cache_root/spotifyd" ]] || exit 3
+    rm -rf -- "$legacy_cache_dir"
+    echo "Removed cached credentials and audio."
   fi
   if [[ -d $build_cache_dir ]]; then
     [[ $build_cache_dir == "$cache_root/omarchy-spotify" ]] || exit 3
@@ -114,4 +111,4 @@ else
   rmdir -- "$runtime_dir" 2>/dev/null || true
 fi
 
-echo "Runtime integration removed. The spotifyd package was left installed."
+echo "Runtime integration removed."

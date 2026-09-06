@@ -7,12 +7,11 @@ umask 077
 
 config_root=${XDG_CONFIG_HOME:-"$HOME/.config"}
 backend="$HOME/.local/lib/omarchy-spotify/omarchy-spotify-backend"
-if [ -x "$backend" ]; then
-  exec "$backend" authenticate \
-    --config-path "$config_root/omarchy-spotify/spotifyd.conf" \
-    --oauth-port 8000
-fi
+[ -x "$backend" ] || {
+  echo "playback-auth.sh: the playback backend is not installed" >&2
+  exit 1
+}
 
-exec /usr/bin/spotifyd authenticate \
+exec "$backend" authenticate \
   --config-path "$config_root/omarchy-spotify/spotifyd.conf" \
   --oauth-port 8000

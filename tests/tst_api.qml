@@ -127,24 +127,24 @@ TestCase {
     compare(Api.filteredSorted([rows[0], null, rows[1]], "", "default"), rows)
   }
 
-  function test_spotifydVolumeCurve_hasStableEndpointsAndRoundTrips() {
-    compare(Api.spotifydVolumeToSlider(0), 0)
-    compare(Api.spotifydVolumeToSlider(1), 1)
-    compare(Api.sliderToSpotifydVolume(0), 0)
-    compare(Api.sliderToSpotifydVolume(1), 1)
+  function test_engineVolumeCurve_hasStableEndpointsAndRoundTrips() {
+    compare(Api.engineVolumeToSlider(0), 0)
+    compare(Api.engineVolumeToSlider(1), 1)
+    compare(Api.sliderToEngineVolume(0), 0)
+    compare(Api.sliderToEngineVolume(1), 1)
 
     var positions = [0.01, 0.1, 0.25, 0.5, 0.75, 0.9]
     for (var i = 0; i < positions.length; i++) {
       var slider = positions[i]
-      var backend = Api.sliderToSpotifydVolume(slider)
-      verify(Math.abs(Api.spotifydVolumeToSlider(backend) - slider) < 0.000001)
+      var backend = Api.sliderToEngineVolume(slider)
+      verify(Math.abs(Api.engineVolumeToSlider(backend) - slider) < 0.000001)
     }
   }
 
-  function test_spotifydVolumeCurve_usesGentlerCubicTaper() {
-    var backendMidpoint = Api.sliderToSpotifydVolume(0.5)
+  function test_engineVolumeCurve_usesGentlerCubicTaper() {
+    var backendMidpoint = Api.sliderToEngineVolume(0.5)
     verify(backendMidpoint > 0.73 && backendMidpoint < 0.75)
-    verify(Api.spotifydVolumeToSlider(0.5) < 0.25)
+    verify(Api.engineVolumeToSlider(0.5) < 0.25)
   }
 
   function test_normalizeVolumePercent_preservesUnknownAndValidMute() {
@@ -452,7 +452,7 @@ TestCase {
     compare(Api.sessionRecordIsEmpty(Api.sessionRecord(oversized, [])), true)
   }
 
-  function test_spotifyTrackId_acceptsUrisUrlsAndSpotifydObjectPaths() {
+  function test_spotifyTrackId_acceptsUrisUrlsAndEngineObjectPaths() {
     compare(Api.spotifyTrackId("spotify:track:14XWXWv5FoCbFzLksawpEe"),
       "14XWXWv5FoCbFzLksawpEe")
     compare(Api.spotifyTrackId("https://open.spotify.com/track/14XWXWv5FoCbFzLksawpEe"),

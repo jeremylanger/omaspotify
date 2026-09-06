@@ -3,15 +3,13 @@ set -euo pipefail
 
 source_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 section=left
-setup_args=()
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-local.sh [--section left|center|right] [--install-spotifyd]
+Usage: scripts/install-local.sh [--section left|center|right]
 
 Validate this checkout, link it into Omarchy's user-plugin directory, install
 the plugin playback backend, and enable the widget through Omarchy's command.
---install-spotifyd also keeps the distro daemon as a fallback.
 EOF
 }
 
@@ -21,10 +19,6 @@ while (( $# > 0 )); do
       [[ $# -ge 2 ]] || { echo "install-local.sh: --section requires a value" >&2; exit 2; }
       section=$2
       shift 2
-      ;;
-    --install-spotifyd)
-      setup_args+=(--install-spotifyd)
-      shift
       ;;
     -h|--help)
       usage
@@ -49,7 +43,7 @@ command -v omarchy >/dev/null 2>&1 || {
 }
 
 omarchy plugin validate "$source_root"
-"$source_root/scripts/setup.sh" "${setup_args[@]}"
+"$source_root/scripts/setup.sh"
 
 plugins_root="${XDG_CONFIG_HOME:-"$HOME/.config"}/omarchy/plugins"
 target="$plugins_root/quickshell.spotify"

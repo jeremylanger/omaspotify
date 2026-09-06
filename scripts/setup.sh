@@ -2,26 +2,21 @@
 set -euo pipefail
 
 source_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-install_spotifyd=0
 force_config=0
 skip_backend_build=${OMARCHY_SPOTIFY_SKIP_BACKEND_BUILD:-0}
 device_name="Omarchy Spotify"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/setup.sh [--install-spotifyd] [--skip-backend-build] [--force-config] [--device-name NAME]
+Usage: scripts/setup.sh [--skip-backend-build] [--force-config] [--device-name NAME]
 
 Verify or build the plugin-owned playback backend and install its user unit.
-spotifyd remains an optional fallback. Neither unit is enabled at login.
+The unit is not enabled at login.
 EOF
 }
 
 while (( $# > 0 )); do
   case $1 in
-    --install-spotifyd)
-      install_spotifyd=1
-      shift
-      ;;
     --force-config)
       force_config=1
       shift
@@ -47,14 +42,6 @@ while (( $# > 0 )); do
   esac
 done
 
-if (( install_spotifyd )) && ! command -v spotifyd >/dev/null 2>&1; then
-  command -v pacman >/dev/null 2>&1 || {
-    echo "setup.sh: --install-spotifyd is supported only on pacman-based Omarchy systems" >&2
-    exit 1
-  }
-  sudo pacman -S --needed spotifyd
-fi
-
 for command_name in secret-tool openssl socat xdg-open systemctl awk cmp install python3 avahi-browse sha256sum; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "setup.sh: required Omarchy base command is missing: $command_name" >&2
@@ -72,7 +59,6 @@ config_dir="$config_root/omarchy-spotify"
 config_file="$config_dir/spotifyd.conf"
 unit_dir="$config_root/systemd/user"
 backend_unit_file="$unit_dir/omarchy-spotify.service"
-fallback_unit_file="$unit_dir/omarchy-spotifyd.service"
 
 backend_binary=${OMARCHY_SPOTIFY_RUNTIME_DIR:-"$HOME/.local/lib/omarchy-spotify"}/omarchy-spotify-backend
 runtime_dir=$(dirname -- "$backend_binary")
@@ -107,14 +93,12 @@ elif (( ! skip_backend_build )); then
   if "$source_root/scripts/build-backend.sh"; then
     backend_ready=1
     backend_changed=1
-  else
-    echo "Warning: the plugin-owned backend could not be built; checking spotifyd fallback." >&2
   fi
 fi
 
-if (( ! backend_ready )) && ! command -v spotifyd >/dev/null 2>&1; then
-  echo "setup.sh: neither the plugin backend nor spotifyd is available" >&2
-  echo "Install Rust to build the backend, or install spotifyd as a fallback." >&2
+if (( ! backend_ready )); then
+  echo "setup.sh: the plugin backend is not available" >&2
+  echo "Install Rust so the backend can be built from source." >&2
   exit 30
 fi
 
@@ -132,7 +116,7 @@ else
   install -m 600 -- "$source_root/config/spotifyd.conf" "$config_file"
 fi
 
-printf '%s\n' "$device_name" | "$source_root/scripts/configure-spotifyd.sh"
+printf '%s\n' "$device_name" | "$source_root/scripts/configure-playback.sh"
 if (( backend_ready )); then
   if [[ ! -f $backend_unit_file ]] \
       || ! cmp -s -- "$source_root/systemd/omarchy-spotify.service" "$backend_unit_file"; then
@@ -140,28 +124,20 @@ if (( backend_ready )); then
   fi
   install -m 644 -- "$source_root/systemd/omarchy-spotify.service" "$backend_unit_file"
 fi
-if command -v spotifyd >/dev/null 2>&1; then
-  install -m 644 -- "$source_root/systemd/omarchy-spotifyd.service" "$fallback_unit_file"
-fi
 systemctl --user daemon-reload
 
 if (( backend_ready && backend_was_active && (backend_changed || unit_changed) )); then
   systemctl --user restart omarchy-spotify.service
 fi
 
-for unit_name in omarchy-spotify.service omarchy-spotifyd.service; do
-  unit_state=$(systemctl --user is-enabled "$unit_name" 2>/dev/null || true)
-  if [[ $unit_state == "enabled" || $unit_state == "enabled-runtime" ]]; then
-    echo "Warning: $unit_name was already enabled at login." >&2
-    echo "For on-demand behavior, run: systemctl --user disable $unit_name" >&2
-  fi
-done
+unit_state=$(systemctl --user is-enabled omarchy-spotify.service 2>/dev/null || true)
+if [[ $unit_state == "enabled" || $unit_state == "enabled-runtime" ]]; then
+  echo "Warning: omarchy-spotify.service was already enabled at login." >&2
+  echo "For on-demand behavior, run: systemctl --user disable omarchy-spotify.service" >&2
+fi
 
 if (( backend_ready )); then
   echo "Installed plugin playback unit: $backend_unit_file"
-fi
-if [[ -f $fallback_unit_file ]]; then
-  echo "Kept spotifyd fallback unit: $fallback_unit_file"
 fi
 echo "Installed private config: $config_file"
 echo "Playback remains stopped and will be started on demand by the plugin."

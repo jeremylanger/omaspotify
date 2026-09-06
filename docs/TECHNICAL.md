@@ -26,8 +26,7 @@ MPRIS, lifecycle, and a stable private Unix-socket boundary. The app starts the
 unit whenever its full player or mini-player is open, when you play on this
 computer, or when you choose it in Devices. Once every player surface closes,
 it stops after the configured idle period; 0 keeps it available indefinitely.
-The distro `spotifyd` unit is retained as a non-running fallback; the two units
-conflict so they cannot claim the same Connect identity together.
+This backend is the only playback engine; there is no second daemon.
 
 The unit sets `PULSE_LATENCY_MSEC=30` only for local playback and caps
 librespot's private player runtime at two Tokio workers. The backend's own
@@ -62,8 +61,7 @@ after every command.
 
 - Omarchy 4 with the Quickshell shell enabled
 - Spotify Premium
-- the exact-commit attested plugin backend, a local source build, or `spotifyd`
-  0.4.2 or newer as fallback
+- the exact-commit attested plugin backend, or a local source build
 - Omarchy base tools: `secret-tool`, `openssl`, `socat`, `xdg-open`, `wl-copy`,
   `avahi-browse`, `systemctl`, and Python 3
 
@@ -83,9 +81,8 @@ same-release checksum alone is never accepted as provenance.
 
 If `gh` is unavailable or any download, checksum, identity, or attestation
 check fails, the artifact is not executed. Setup instead builds `Cargo.lock`
-from the reviewed source with the available Cargo when present, or offers the
-official Arch `spotifyd` package as the last-resort fallback. Configuration,
-verified downloads, local builds, and user units themselves need no privilege.
+from the reviewed source with the available Cargo. Configuration, verified
+downloads, local builds, and user units themselves need no privilege.
 
 Omarchy treats any write inside a plugin directory as a change to the plugin and
 hot-reloads it, so the backend is compiled to
@@ -197,8 +194,7 @@ To install only the playback integration:
 ./scripts/setup.sh
 ```
 
-Neither path enables or starts a playback unit at login. Pass
-`--install-spotifyd` only when a distro fallback is also wanted.
+Neither path enables or starts the playback unit at login.
 
 ## Verification
 
@@ -229,19 +225,11 @@ cd "$HOME" && "$HOME/.config/omarchy/plugins/quickshell.spotify/scripts/uninstal
 This removes the plugin and all plugin-owned services, binaries, config, state,
 caches, sockets, backups, and keyring entries. See the README's
 **Remove it completely** section for the equivalent commands and legacy
-keybinding check. The `spotifyd` package remains installed because another
-client may use it.
-
-Remove that package separately only when it was installed solely for this app:
-
-```bash
-omarchy pkg drop spotifyd
-```
+keybinding check.
 
 ## Upstream projects
 
 - [Omarchy](https://github.com/basecamp/omarchy)
-- [spotifyd](https://github.com/Spotifyd/spotifyd)
 - [librespot](https://github.com/librespot-org/librespot)
 - [spotify-player](https://github.com/aome510/spotify-player)
 - [ncspot](https://github.com/hrkfdn/ncspot)

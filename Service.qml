@@ -92,7 +92,7 @@ Item {
   readonly property string loginProgress: loginProgressText()
 
   readonly property var mprisPlayers: Mpris.players ? Mpris.players.values : []
-  readonly property var activePlayer: spotifydPlayer()
+  readonly property var activePlayer: localEnginePlayer()
   readonly property bool hasLocalPlayer: activePlayer !== null
   property var remotePlayback: null
   property bool remotePlaybackLoading: false
@@ -197,7 +197,7 @@ Item {
     : (hasLocalPlayer && activePlayer.volumeSupported
       ? Math.max(0, Math.min(1, Number(activePlayer.volume) || 0)) : 0)
   readonly property real reportedSliderVolume: useRemotePlayback
-    ? playbackVolume : Api.spotifydVolumeToSlider(playbackVolume)
+    ? playbackVolume : Api.engineVolumeToSlider(playbackVolume)
   readonly property real volume: pendingSliderVolume >= 0
     ? pendingSliderVolume : reportedSliderVolume
   readonly property bool volumePending: pendingSliderVolume >= 0
@@ -222,7 +222,7 @@ Item {
     ? String(remoteTrack.externalUrl || spotifyWebUrl(currentUri)) : spotifyWebUrl(currentUri)
   readonly property string currentTrackId: {
     // When a remote device owns playback, stale metadata from an idle local
-    // spotifyd player must not turn a podcast episode into a song.
+    // The engine player must not turn a podcast episode into a song.
     if (useRemotePlayback) {
       if (!remoteTrack || remoteTrack.type !== "track") return ""
       return Api.spotifyTrackId(remoteTrack.uri)
@@ -232,7 +232,7 @@ Item {
     var id = Api.spotifyTrackId(currentUri)
     if (id) return id
 
-    // spotifyd exposes the recording as an MPRIS object path such as
+    // The engine exposes the recording as an MPRIS object path such as
     // /spotify/track/<id>, but does not currently publish xesam:url.
     id = Api.spotifyTrackId(metadataString("mpris:trackid"))
     if (id) return id
@@ -628,19 +628,18 @@ Item {
     resumeLyricsInstallIntent()
   }
 
-  function isSpotifyd(player) {
+  function isLocalEngine(player) {
     if (!player) return false
     var identity = [player.dbusName, player.desktopEntry, player.identity]
       .join(" ").toLowerCase()
-    return identity.indexOf("spotifyd") !== -1
-      || identity.indexOf("librespot") !== -1
+    return identity.indexOf("librespot") !== -1
   }
 
-  function spotifydPlayer() {
+  function localEnginePlayer() {
     var fallback = null
     for (var i = 0; i < mprisPlayers.length; i++) {
       var player = mprisPlayers[i]
-      if (!isSpotifyd(player)) continue
+      if (!isLocalEngine(player)) continue
       if (player.isPlaying) return player
       if (!fallback) fallback = player
     }
@@ -1057,7 +1056,7 @@ Item {
     var localVolume = !useRemotePlayback && hasLocalPlayer
       && activePlayer.volumeSupported
     var normalized = localVolume
-      ? Api.sliderToSpotifydVolume(sliderValue) : sliderValue
+      ? Api.sliderToEngineVolume(sliderValue) : sliderValue
     var sonos = volumeFlushTarget() === "sonos"
     if (sonos && spotifyConnectManager.controlBusy) return false
     var remoteSerial = 0
@@ -2923,8 +2922,7 @@ Item {
       clearPendingPlayback()
       return
     }
-    if (!daemonManager.usingFallbackRuntime
-        && (backendClient.ready || daemonManager.playbackReady)) {
+    if (backendClient.ready || daemonManager.playbackReady) {
       waitForLocalSocketThenPlay(playbackSerial)
       return
     }
@@ -4066,7 +4064,7 @@ Item {
 
   BackendClient {
     id: backendClient
-    wanted: daemonManager.running && !daemonManager.usingFallbackRuntime
+    wanted: daemonManager.running
     onErrorCodeChanged: if (errorCode === "audio_key_unavailable")
       root.fail(errorMessage || "Spotify could not play this track on this computer")
   }

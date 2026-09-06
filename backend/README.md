@@ -69,6 +69,5 @@ recursive watcher from reloading the plugin and killing the build.
 
 See [the protocol reference](../docs/BACKEND_PROTOCOL.md) for the compatibility
 contract and [release process](../docs/RELEASING.md) for the artifact-provenance
-requirements. The legacy `omarchy-spotifyd.service` remains installable as a
-fallback and conflicts with the primary unit so two local receivers cannot run
+requirements. It is the only playback unit, so a single local receiver runs
 accidentally with the same device identity.

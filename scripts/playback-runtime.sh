@@ -13,7 +13,6 @@ backend_binary="$runtime_dir/omarchy-spotify-backend"
 backend_source_id_file="$runtime_dir/backend-source.sha256"
 backend_binary_hash_file="$runtime_dir/backend-binary.sha256"
 backend_unit=omarchy-spotify.service
-fallback_unit=omarchy-spotifyd.service
 config_root=${XDG_CONFIG_HOME:-"$HOME/.config"}
 installed_backend_unit="$config_root/systemd/user/omarchy-spotify.service"
 source_backend_unit="$source_root/systemd/omarchy-spotify.service"
@@ -43,13 +42,8 @@ backend_install_is_current() {
 }
 
 preferred_unit() {
-  if backend_install_is_current && unit_exists "$backend_unit"; then
-    printf '%s\n' "$backend_unit"
-  elif command -v spotifyd >/dev/null 2>&1 && unit_exists "$fallback_unit"; then
-    printf '%s\n' "$fallback_unit"
-  else
-    return 1
-  fi
+  backend_install_is_current && unit_exists "$backend_unit" || return 1
+  printf '%s\n' "$backend_unit"
 }
 
 case $action in
@@ -77,7 +71,6 @@ case $action in
     ;;
   stop)
     systemctl --user stop "$backend_unit" 2>/dev/null || true
-    systemctl --user stop "$fallback_unit" 2>/dev/null || true
     ;;
   status)
     unit=$(preferred_unit) || exit 1

@@ -125,8 +125,7 @@ can move the widget later with Omarchy's bar controls.
 Local playback installs an exact-version backend only after its GitHub build
 provenance matches this plugin version's tag and the checkout's backend inputs
 still match that tagged source. If verification is unavailable, setup builds
-the locked Rust source locally or offers Omarchy's packaged `spotifyd` fallback
-instead of executing an unverified download.
+the locked Rust source locally instead of executing an unverified download.
 
 ## Remove it completely
 
@@ -136,7 +135,7 @@ Run the bundled uninstaller from outside the plugin directory:
 cd "$HOME" && "$HOME/.config/omarchy/plugins/quickshell.spotify/scripts/uninstall.sh"
 ```
 
-It disables and removes the plugin, stops and removes both user services,
+It disables and removes the plugin, stops and removes its user service,
 restarts the shell, and deletes all plugin-owned configuration, cached audio,
 backend build files, installed binaries, playback state, runtime sockets, old
 configuration backups, and matching GNOME Keyring entries.
@@ -153,13 +152,8 @@ omarchy restart shell
 ```
 
 The cleanup deliberately leaves unrelated software alone. A source checkout
-outside Omarchy's plugin directory, separate plugins such as Omasing, and the
-`spotifyd` package remain in place. If this plugin was the only reason you
-installed the fallback package, remove it with:
-
-```bash
-omarchy pkg drop spotifyd
-```
+outside Omarchy's plugin directory and separate plugins such as Omasing remain
+in place.
 
 Very old installation instructions may also have added a custom Hyprland
 shortcut. The uninstaller reports any such references without rewriting your

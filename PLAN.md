@@ -145,22 +145,34 @@ Zero behavior change. Establishes a clean base and a green baseline.
 - [x] Add CI that runs `scripts/test.sh` on push and PR
 - [x] Reset `CHANGELOG.md` — it is 296 lines of upstream's release history
 
-## Phase B — Engine consolidation
+## Phase B — Engine consolidation — DONE
 
-The plugin ships two playback engines. See the appendix for why. Deleting the legacy one
-is the single largest simplification available and removes a whole class of
-"which engine is playing / why does it sound different" bugs.
+The plugin shipped two playback engines. See the appendix for why.
 
-- [ ] Make the Rust backend the only engine
-- [ ] Delete `systemd/omarchy-spotifyd.service`, `config/spotifyd.conf`,
-      `scripts/configure-spotifyd.sh`, `scripts/spotifyd-auth.sh`, `scripts/spotifyd-logout.sh`
-- [ ] Delete fallback paths: `DaemonManager.usingFallbackRuntime`, `Service.spotifydPlayer()`,
-      `Service.isSpotifyd()`, `Api.spotifydVolumeToSlider`
-- [ ] Simplify unit detection in `DaemonManager.qml` — no more probing which unit exists
-- [ ] Drop `--install-spotifyd` from `setup.sh` and `install-local.sh`
-- [ ] Strip spotifyd from `tests/test-scripts.sh` (48 references) and `tests/tst_api.qml`
-- [ ] Rename the config file away from `spotifyd.conf` — the backend reads it but it is
-      no longer a spotifyd config
+**Correction to the original plan.** It listed `Service.spotifydPlayer()`,
+`Service.isSpotifyd()` and `Api.spotifydVolumeToSlider` as fallback code to delete.
+They are not. `isSpotifyd()` matched `librespot` as well as `spotifyd`, so it is how the
+app finds the **real** backend over MPRIS, and the volume curve converts librespot's
+softvol logarithmic range for every local play. Deleting them would have killed local
+playback. They were misleadingly named, so they were renamed, not removed:
+`isLocalEngine()`, `localEnginePlayer()`, `Api.engineVolumeToSlider()`,
+`Api.sliderToEngineVolume()`. Only `usingFallbackRuntime` was genuinely dead.
+
+- [x] Make the Rust backend the only engine
+- [x] Delete `systemd/omarchy-spotifyd.service` and its `Conflicts=` line
+- [x] Rename the shared helpers off the spotifyd name: `configure-playback.sh`,
+      `playback-auth.sh`, `playback-logout.sh`
+- [x] Delete `DaemonManager.usingFallbackRuntime` and its two branch sites in `Service.qml`
+- [x] Simplify `preferred_unit()` in `playback-runtime.sh` — no more probing which unit exists
+- [x] Drop `--install-spotifyd` and the `pkexec pacman` fallback from `setup.sh`,
+      `setup-playback.sh` and `install-local.sh`
+- [x] Strip spotifyd from `tests/test-scripts.sh` and `tests/tst_api.qml`
+- [x] Update README, TECHNICAL.md and backend/README.md
+- [ ] Rename the config file away from `spotifyd.conf` — **deferred to Phase C**, because it
+      also lives in `backend/src/config.rs` and this machine has no Rust toolchain to
+      verify a build. Phase C renames the whole `omarchy-spotify` path anyway
+- [ ] Drop the pre-1.0.3 `$XDG_CACHE_HOME/spotifyd` credential migration —
+      **deferred to Phase C**, same reason: it is mirrored in `engine.rs`
 
 ## Phase C — Rebrand, identity & release pipeline
 
