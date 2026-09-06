@@ -6,7 +6,7 @@ import "Api.js" as Api
 
 // Private Unix-socket client for the plugin backend. Local load/control uses
 // this when the supervised process is running; MPRIS and the Web API remain
-// the fallback when the socket is absent or the spotifyd unit is active.
+// the fallback when the socket is absent.
 Item {
   id: root
 
@@ -28,7 +28,7 @@ Item {
 
   readonly property string socketPath: {
     var runtime = Quickshell.env("XDG_RUNTIME_DIR")
-    return String(runtime || "/tmp") + "/omarchy-spotify/backend.sock"
+    return String(runtime || "/tmp") + "/omaspotify/backend.sock"
   }
   readonly property bool ready: connected
     && (lifecycle === "ready" || lifecycle === "")

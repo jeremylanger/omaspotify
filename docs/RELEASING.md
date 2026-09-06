@@ -23,7 +23,7 @@ publishing it with `SHA256SUMS` in the matching GitHub release.
 For each downloaded executable, verify the checksum and then independently bind
 GitHub's attestation to all of the following:
 
-- repository `stappmus/Omarchy-Spotify`;
+- repository `jeremylanger/omaspotify`;
 - `.github/workflows/release-backend.yml` at the exact version tag;
 - the release commit digest; and
 - a GitHub-hosted runner.

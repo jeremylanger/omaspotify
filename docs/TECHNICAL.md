@@ -5,7 +5,7 @@ details out of the user-facing README.
 
 ## Architecture
 
-Omarchy Spotify runs as a plugin inside Omarchy's existing `omarchy-shell`
+OmaSpotify runs as a plugin inside Omarchy's existing `omarchy-shell`
 Quickshell process. It provides a shared service, a bar widget, and a lazy-loaded
 panel. There is no embedded website, browser engine, second shell process, or
 resident helper process.
@@ -18,7 +18,7 @@ rate while that device is playing. Fast `/me/player` polling is reserved for
 remote or unknown targets. Spotify data and other user actions also use the
 Web API.
 
-Local audio runs in the plugin-owned `omarchy-spotify-backend` Rust process,
+Local audio runs in the plugin-owned `omaspotify-backend` Rust process,
 supervised by a static systemd user unit that is never enabled at login. The
 backend embeds a commit-pinned librespot revision rather than duplicating its
 private-protocol implementation. It owns configuration, cache/authentication,
@@ -86,7 +86,7 @@ downloads, local builds, and user units themselves need no privilege.
 
 Omarchy treats any write inside a plugin directory as a change to the plugin and
 hot-reloads it, so the backend is compiled to
-`$XDG_CACHE_HOME/omarchy-spotify/target` (override with `CARGO_TARGET_DIR`),
+`$XDG_CACHE_HOME/omaspotify/target` (override with `CARGO_TARGET_DIR`),
 never to the plugin directory itself. This keeps the recursive file watcher
 from reloading the plugin — and killing the build — mid-setup. A stale
 `backend/target/` left by an older build can be removed; the backend ignores it.
@@ -103,10 +103,10 @@ streaming-only PKCE grant on port `8990`.
 No client secret or Spotify password enters the plugin. OAuth refresh tokens
 are written to GNOME Keyring over stdin and separated by client identity.
 Reusable local-playback authorization is stored with owner-only permissions in
-`$XDG_STATE_HOME/omarchy-spotify`; older credentials under `$XDG_CACHE_HOME`
+`$XDG_STATE_HOME/omaspotify`; older credentials under `$XDG_CACHE_HOME`
 are accepted once and migrated so clearing disposable caches cannot deauthorize
 this computer. Player restore state (last tab, filters, search history, and
-similar) is written to `$XDG_STATE_HOME/omarchy-spotify/session.json` so it
+similar) is written to `$XDG_STATE_HOME/omaspotify/session.json` so it
 does not pollute Omarchy's `shell.json`. Older copies kept as plugin settings
 are read once and removed from `shell.json` after that file is written.
 Short-lived access tokens and PKCE values remain in the shell process. OAuth
@@ -185,7 +185,7 @@ From a checkout on Omarchy 4:
 
 The command validates the manifest, installs the user-level playback files,
 links the checkout at
-`~/.config/omarchy/plugins/quickshell.spotify`, and enables the bar widget. It
+`~/.config/omarchy/plugins/io.github.jeremylanger.omaspotify`, and enables the bar widget. It
 refuses to replace an existing plugin.
 
 To install only the playback integration:
@@ -219,7 +219,7 @@ See [Benchmark](BENCHMARK.md) for methodology and recorded results.
 Run the bundled uninstaller from outside the plugin directory:
 
 ```bash
-cd "$HOME" && "$HOME/.config/omarchy/plugins/quickshell.spotify/scripts/uninstall.sh"
+cd "$HOME" && "$HOME/.config/omarchy/plugins/io.github.jeremylanger.omaspotify/scripts/uninstall.sh"
 ```
 
 This removes the plugin and all plugin-owned services, binaries, config, state,

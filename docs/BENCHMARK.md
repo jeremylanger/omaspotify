@@ -42,7 +42,7 @@ running.
 
 | Ready-to-use UI | PSS | RSS |
 |---|---:|---:|
-| Omarchy Spotify, incremental over Omarchy shell | **54.8 MiB** | **61.5 MiB** |
+| OmaSpotify, incremental over Omarchy shell | **54.8 MiB** | **61.5 MiB** |
 | Official Spotify desktop client, all processes | **912.2 MiB** | **1,672.6 MiB** |
 
 On this host, the populated plugin window therefore used **857.4 MiB less
@@ -83,7 +83,7 @@ would mutate the tester's real Spotify playback state.
 ## Plugin backend migration check
 
 On 2026-08-16, the same host was switched live from the patched spotifyd
-prototype to `omarchy-spotify-backend` while a real track was playing. After the
+prototype to `omaspotify-backend` while a real track was playing. After the
 backend optimization audit, three 10-second live samples reported a stable
 backend median of **16.77 MiB PSS / 26.09 MiB RSS**. The documented spotifyd
 playback median above was 26.3 MiB PSS / 35.6 MiB RSS, so the plugin-owned

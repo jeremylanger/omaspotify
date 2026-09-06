@@ -1,7 +1,7 @@
 # Backend protocol
 
 The plugin backend listens at
-`$XDG_RUNTIME_DIR/omarchy-spotify/backend.sock`. The socket and every message
+`$XDG_RUNTIME_DIR/omaspotify/backend.sock`. The socket and every message
 are private to the current user. Transport is UTF-8 JSON, one object per line.
 
 Protocol version 1 requests have a caller-chosen integer id and a flattened

@@ -174,27 +174,44 @@ playback. They were misleadingly named, so they were renamed, not removed:
 - [ ] Drop the pre-1.0.3 `$XDG_CACHE_HOME/spotifyd` credential migration —
       **deferred to Phase C**, same reason: it is mirrored in `engine.rs`
 
-## Phase C — Rebrand, identity & release pipeline
+## Phase C — Rebrand, identity & release pipeline — DONE
 
-Identity is threaded through systemd, state paths, and IPC. All of it renames so OmaSpotify
-installs **alongside** the original without collision.
+Identity was threaded through systemd, state paths, IPC and the keyring. All of it now
+renames, so OmaSpotify installs **alongside** the original without collision.
 
-- [ ] `manifest.json`: `id` → `io.github.jeremylanger.omaspotify`, `name` → `OmaSpotify`,
-      `author`, bar widget `displayName`
-- [ ] `systemd/omarchy-spotify.service` → `omaspotify.service`
-- [ ] Config path `~/.config/omarchy-spotify/` → `~/.config/omaspotify/`
-- [ ] Binary install path `~/.local/lib/omarchy-spotify/` → `~/.local/lib/omaspotify/`
-- [ ] State/session dir references in `Service.qml` (`stateDir`, session file paths)
-- [ ] IPC target string in `Panel.qml` (`ipcTarget`)
-- [ ] Connect `device_name` → `"OmaSpotify"` (must stay distinct from the original's
-      "Omarchy Spotify" or the two engines fight over playback)
-- [ ] `DaemonManager.qml`: `unitName` default
-- [ ] Backend Cargo package `omarchy-spotify-backend` → `omaspotify-backend`
-- [ ] **Fix the release pipeline.** `scripts/build-backend.sh` → `repository=jeremylanger/omaspotify`;
-      update `.github/workflows/release-backend.yml` accordingly; cut a real tagged release
-      so users get an attested binary instead of a local Rust build
+- [x] `manifest.json`: `id` → `io.github.jeremylanger.omaspotify`, `name` → `OmaSpotify`,
+      `author` → `jeremylanger`, bar widget `displayName`, `deviceName` default
+- [x] `systemd/omarchy-spotify.service` → `systemd/omaspotify.service`
+- [x] Config path `~/.config/omarchy-spotify/` → `~/.config/omaspotify/`,
+      and `spotifyd.conf` → `playback.conf` (the Phase B deferral)
+- [x] Binary install path `~/.local/lib/omarchy-spotify/` → `~/.local/lib/omaspotify/`
+- [x] State, build-cache and runtime-socket dirs → `omaspotify`
+- [x] Keyring service `quickshell-spotify` → `omaspotify`
+- [x] Env vars `OMARCHY_SPOTIFY_*` → `OMASPOTIFY_*`
+- [x] Backend Cargo package + binary `omarchy-spotify-backend` → `omaspotify-backend`
+- [x] MPRIS identity, desktop entry and bus name. The identity keeps its `(librespot)`
+      suffix — `Service.isLocalEngine()` matches on it to find the backend
+- [x] Connect `device_name` → `"OmaSpotify"`, distinct from the original's "Omarchy Spotify"
+- [x] **Fixed the release pipeline.** `build-backend.sh` now attests against
+      `jeremylanger/omaspotify` instead of upstream
+- [x] LICENSE keeps upstream's MIT copyright and adds ours
+- [x] README install command points at the fork
+- [x] Bump version to `2.0.0`
+- [x] Made the test suite read the version from `manifest.json` rather than hardcoding it,
+      so the next bump cannot silently skip the release-attestation test
+
+**Still unverified:** this machine has no Rust toolchain, so the backend changes
+(string literals in `config.rs` / `mpris.rs` / `engine.rs`, and the Cargo package rename)
+compile-check only in CI. Run `cargo test --manifest-path backend/Cargo.toml` locally
+before tagging a release.
+
+**Still open, needs a toolchain:**
+- [ ] Drop the pre-1.0.3 `$XDG_CACHE_HOME/spotifyd` credential migration. Nobody upgrades
+      into a fresh plugin id in place, so it serves nobody. It is a structural change in
+      `engine.rs` (a function parameter and its call site), not a string swap, so it waits
+      for a compiler
+- [ ] Cut a real `v2.0.0` tag so users get an attested binary instead of a local Rust build
 - [ ] README rewrite: positioning vs the original and vs MPRIS popups
-- [ ] Bump version to `2.0.0`
 
 ## Phase D — Decomposition & test safety net
 

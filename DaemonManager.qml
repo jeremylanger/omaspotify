@@ -15,9 +15,9 @@ Item {
   height: 0
 
   property string pluginDir: ""
-  property string deviceName: "Omarchy Spotify"
+  property string deviceName: "OmaSpotify"
   property int bitrateKbps: 320
-  property string unitName: "omarchy-spotify.service"
+  property string unitName: "omaspotify.service"
   property bool authenticationCancelled: false
   property bool mprisPresent: false
 

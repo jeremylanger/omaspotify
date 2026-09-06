@@ -16,3 +16,7 @@ Changes below start from the fork point. For the history of the original plugin,
   set of volume and position handling.
 - Renamed the shared playback helpers off the spotifyd name and renamed the
   engine discovery and volume helpers to say what they actually do.
+- Renamed the plugin to OmaSpotify. New plugin id, service unit, config, state,
+  cache, socket, keyring entry, backend binary and Spotify Connect device name,
+  so it installs alongside the original instead of colliding with it.
+- Playback backends are now verified against this repository's own releases.

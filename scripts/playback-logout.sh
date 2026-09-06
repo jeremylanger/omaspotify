@@ -12,13 +12,13 @@ cache_root=${XDG_CACHE_HOME:-"$HOME/.cache"}
 }
 
 credential_files=(
-  "$state_root/omarchy-spotify/oauth/credentials.json"
-  "$state_root/omarchy-spotify/zeroconf/credentials.json"
+  "$state_root/omaspotify/oauth/credentials.json"
+  "$state_root/omaspotify/zeroconf/credentials.json"
   "$cache_root/spotifyd/oauth/credentials.json"
   "$cache_root/spotifyd/zeroconf/credentials.json"
 )
-[[ ${credential_files[0]} == "$state_root/omarchy-spotify/oauth/credentials.json" ]] || exit 3
+[[ ${credential_files[0]} == "$state_root/omaspotify/oauth/credentials.json" ]] || exit 3
 [[ ${credential_files[2]} == "$cache_root/spotifyd/oauth/credentials.json" ]] || exit 3
 
-systemctl --user stop omarchy-spotify.service 2>/dev/null || true
+systemctl --user stop omaspotify.service 2>/dev/null || true
 rm -f -- "${credential_files[@]}"

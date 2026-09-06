@@ -20,7 +20,7 @@ Item {
   property var pluginRegistry: null
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "quickshell.spotify"
+    ? String(manifest.id) : "io.github.jeremylanger.omaspotify"
   readonly property string pluginDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : ""
   readonly property string homeDirectory: Quickshell.env("HOME") || ""
@@ -29,11 +29,11 @@ Item {
     if (explicit) return explicit
     return homeDirectory ? homeDirectory + "/.local/state" : ".local/state"
   }
-  readonly property string stateDir: stateHome + "/omarchy-spotify"
+  readonly property string stateDir: stateHome + "/omaspotify"
   readonly property string sessionPath: stateDir + "/session.json"
 
   readonly property var defaultSettingValues: ({
-    deviceName: "Omarchy Spotify",
+    deviceName: "OmaSpotify",
     idleShutdownMinutes: 15,
     showMiniPlayer: "On",
     shortcutPlayer: "Omarchy Music app",
@@ -48,7 +48,7 @@ Item {
   })
   property var settings: Api.shallowCopy(defaultSettingValues)
 
-  readonly property string deviceName: String(settings.deviceName || "Omarchy Spotify").trim() || "Omarchy Spotify"
+  readonly property string deviceName: String(settings.deviceName || "OmaSpotify").trim() || "OmaSpotify"
   readonly property int idleShutdownMinutes: Math.max(0, Math.min(1440,
     Math.floor(Number(settings.idleShutdownMinutes) || 0)))
   readonly property bool showMiniPlayer: String(settings.showMiniPlayer || "On") !== "Off"
@@ -301,7 +301,7 @@ Item {
   property string selectedDeviceId: ""
   property bool selectedDeviceExplicit: false
   property string localDeviceId: ""
-  property string localRuntimeDeviceName: "Omarchy Spotify"
+  property string localRuntimeDeviceName: "OmaSpotify"
   property string searchQuery: ""
   property var searchGroups: Api.searchGroups({}, 128)
   property var savedUris: ({})
@@ -468,7 +468,7 @@ Item {
       var key = keys[i]
       if (source[key] !== undefined) next[key] = source[key]
     }
-    next.deviceName = String(next.deviceName || "Omarchy Spotify").trim() || "Omarchy Spotify"
+    next.deviceName = String(next.deviceName || "OmaSpotify").trim() || "OmaSpotify"
     next.idleShutdownMinutes = Math.max(0, Math.min(1440,
       Math.floor(Number(next.idleShutdownMinutes) || 0)))
     next.showMiniPlayer = String(next.showMiniPlayer || "On") === "Off" ? "Off" : "On"
@@ -1764,7 +1764,7 @@ Item {
     spotifyApi.request("POST", "/me/playlists", null, {
       name: normalized.slice(0, 100),
       "public": false,
-      description: "Created with Omarchy Spotify"
+      description: "Created with OmaSpotify"
     }, function(status, payload, error) {
       root.playlistActionBusy = false
       if (error) { root.fail(error); return }
@@ -1893,7 +1893,7 @@ Item {
       spotifyApi.request("POST", "/me/playlists", null, {
         name: String(playlist.name || "My playlist").slice(0, 100),
         "public": false,
-        description: "Your copy, created with Omarchy Spotify"
+        description: "Your copy, created with OmaSpotify"
       }, function(status, payload, createError) {
         if (expected !== root.dataSerial) return
         if (createError) { root.finishPlaylistConversion(createError); return }
@@ -3048,7 +3048,7 @@ Item {
     if (!id) return
     localActivationRequested = false
     apiAction("PUT", "/me/player", null,
-      { device_ids: [id], play: false }, "Omarchy Spotify is ready",
+      { device_ids: [id], play: false }, "OmaSpotify is ready",
       function(ok) {
         if (ok) {
           root.selectedDeviceId = id

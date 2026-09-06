@@ -2,7 +2,7 @@
 set -euo pipefail
 
 config_root=${XDG_CONFIG_HOME:-"$HOME/.config"}
-config_file="$config_root/omarchy-spotify/spotifyd.conf"
+config_file="$config_root/omaspotify/playback.conf"
 
 IFS= read -r device_name
 bitrate=""

@@ -3,8 +3,8 @@ set -euo pipefail
 
 source_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 force_config=0
-skip_backend_build=${OMARCHY_SPOTIFY_SKIP_BACKEND_BUILD:-0}
-device_name="Omarchy Spotify"
+skip_backend_build=${OMASPOTIFY_SKIP_BACKEND_BUILD:-0}
+device_name="OmaSpotify"
 
 usage() {
   cat <<'EOF'
@@ -55,12 +55,12 @@ done
 }
 
 config_root=${XDG_CONFIG_HOME:-"$HOME/.config"}
-config_dir="$config_root/omarchy-spotify"
-config_file="$config_dir/spotifyd.conf"
+config_dir="$config_root/omaspotify"
+config_file="$config_dir/playback.conf"
 unit_dir="$config_root/systemd/user"
-backend_unit_file="$unit_dir/omarchy-spotify.service"
+backend_unit_file="$unit_dir/omaspotify.service"
 
-backend_binary=${OMARCHY_SPOTIFY_RUNTIME_DIR:-"$HOME/.local/lib/omarchy-spotify"}/omarchy-spotify-backend
+backend_binary=${OMASPOTIFY_RUNTIME_DIR:-"$HOME/.local/lib/omaspotify"}/omaspotify-backend
 runtime_dir=$(dirname -- "$backend_binary")
 backend_source_id_file="$runtime_dir/backend-source.sha256"
 backend_binary_hash_file="$runtime_dir/backend-binary.sha256"
@@ -83,7 +83,7 @@ backend_install_is_current() {
 }
 
 backend_was_active=0
-if systemctl --user is-active --quiet omarchy-spotify.service 2>/dev/null; then
+if systemctl --user is-active --quiet omaspotify.service 2>/dev/null; then
   backend_was_active=1
 fi
 
@@ -113,27 +113,27 @@ else
     cp -p -- "$config_file" "$backup"
     echo "Backed up previous configuration to: $backup"
   fi
-  install -m 600 -- "$source_root/config/spotifyd.conf" "$config_file"
+  install -m 600 -- "$source_root/config/playback.conf" "$config_file"
 fi
 
 printf '%s\n' "$device_name" | "$source_root/scripts/configure-playback.sh"
 if (( backend_ready )); then
   if [[ ! -f $backend_unit_file ]] \
-      || ! cmp -s -- "$source_root/systemd/omarchy-spotify.service" "$backend_unit_file"; then
+      || ! cmp -s -- "$source_root/systemd/omaspotify.service" "$backend_unit_file"; then
     unit_changed=1
   fi
-  install -m 644 -- "$source_root/systemd/omarchy-spotify.service" "$backend_unit_file"
+  install -m 644 -- "$source_root/systemd/omaspotify.service" "$backend_unit_file"
 fi
 systemctl --user daemon-reload
 
 if (( backend_ready && backend_was_active && (backend_changed || unit_changed) )); then
-  systemctl --user restart omarchy-spotify.service
+  systemctl --user restart omaspotify.service
 fi
 
-unit_state=$(systemctl --user is-enabled omarchy-spotify.service 2>/dev/null || true)
+unit_state=$(systemctl --user is-enabled omaspotify.service 2>/dev/null || true)
 if [[ $unit_state == "enabled" || $unit_state == "enabled-runtime" ]]; then
-  echo "Warning: omarchy-spotify.service was already enabled at login." >&2
-  echo "For on-demand behavior, run: systemctl --user disable omarchy-spotify.service" >&2
+  echo "Warning: omaspotify.service was already enabled at login." >&2
+  echo "For on-demand behavior, run: systemctl --user disable omaspotify.service" >&2
 fi
 
 if (( backend_ready )); then

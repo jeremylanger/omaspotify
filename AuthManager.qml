@@ -109,7 +109,7 @@ Item {
     lookupHandled = false
     secretLookup.command = [
       "secret-tool", "lookup",
-      "service", "quickshell-spotify",
+      "service", "omaspotify",
       "kind", "refresh-token",
       "client-id", String(clientId)
     ]
@@ -190,7 +190,7 @@ Item {
     if (keyringClear.running) return
     keyringClear.command = [
       "secret-tool", "clear",
-      "service", "quickshell-spotify",
+      "service", "omaspotify",
       "kind", "refresh-token",
       "client-id", String(clientId)
     ]

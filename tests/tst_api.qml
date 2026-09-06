@@ -413,7 +413,7 @@ TestCase {
     compare(Api.sessionRecordIsEmpty(Api.parseSessionRecord("{")), true)
     compare(Api.sessionRecordIsEmpty(Api.parseSessionRecord("[]")), true)
     compare(Api.pluginSettingsHaveSessionKeys(null), false)
-    compare(Api.pluginSettingsHaveSessionKeys({ deviceName: "Omarchy Spotify" }), false)
+    compare(Api.pluginSettingsHaveSessionKeys({ deviceName: "OmaSpotify" }), false)
     compare(Api.pluginSettingsHaveSessionKeys({ sessionState: "{}" }), true)
     compare(Api.pluginSettingsHaveSessionKeys({ searchHistory: "[]" }), true)
 

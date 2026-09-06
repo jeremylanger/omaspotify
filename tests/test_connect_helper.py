@@ -50,8 +50,8 @@ class ConnectHelperTests(unittest.TestCase):
                 paths = helper.credentials_paths()
 
         self.assertEqual(paths, [
-            root / "state/omarchy-spotify/oauth/credentials.json",
-            root / "state/omarchy-spotify/zeroconf/credentials.json",
+            root / "state/omaspotify/oauth/credentials.json",
+            root / "state/omaspotify/zeroconf/credentials.json",
             root / "cache/spotifyd/oauth/credentials.json",
             root / "cache/spotifyd/zeroconf/credentials.json",
         ])

@@ -32,7 +32,7 @@ mapfile -t playback_pids < <(
   {
     for process_dir in /proc/[0-9]*; do
       executable=$(readlink -f -- "$process_dir/exe" 2>/dev/null || true)
-      if [[ $executable == */omarchy-spotify-backend ]]; then
+      if [[ $executable == */omaspotify-backend ]]; then
         printf '%s\n' "${process_dir##*/}"
       fi
     done

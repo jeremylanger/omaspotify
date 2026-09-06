@@ -611,7 +611,7 @@ pub async fn authenticate(config: &BackendConfig, oauth_port: u16) -> Result<()>
         OAUTH_SCOPES.to_vec(),
     )
     .with_custom_message(
-        "<h3 style=\"color: darkgreen\">Authentication successful. You can return to Omarchy Spotify.</h3>",
+        "<h3 style=\"color: darkgreen\">Authentication successful. You can return to OmaSpotify.</h3>",
     )
     .open_in_browser()
     .build()

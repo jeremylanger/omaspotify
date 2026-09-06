@@ -51,10 +51,10 @@ impl RootInterface for MprisAdapter {
         Ok(false)
     }
     async fn identity(&self) -> fdo::Result<String> {
-        Ok("Omarchy Spotify (librespot)".into())
+        Ok("OmaSpotify (librespot)".into())
     }
     async fn desktop_entry(&self) -> fdo::Result<String> {
-        Ok("omarchy-spotify".into())
+        Ok("omaspotify".into())
     }
     async fn supported_uri_schemes(&self) -> fdo::Result<Vec<String>> {
         Ok(vec!["spotify".into()])
@@ -332,12 +332,12 @@ fn track_id_for(uri: &str) -> TrackId {
     if id.is_empty() {
         id = "track".to_string();
     }
-    TrackId::try_from(format!("/com/github/QuickshellSpotify/track/{id}"))
+    TrackId::try_from(format!("/com/github/OmaSpotify/track/{id}"))
         .unwrap_or(TrackId::NO_TRACK)
 }
 
 fn bus_name_suffix(process_id: u32) -> String {
-    format!("OmarchySpotify.instance{process_id}")
+    format!("OmaSpotify.instance{process_id}")
 }
 
 #[cfg(test)]
@@ -367,6 +367,6 @@ mod tests {
 
     #[test]
     fn mpris_name_is_unique_and_has_a_valid_non_numeric_component() {
-        assert_eq!(bus_name_suffix(42), "OmarchySpotify.instance42");
+        assert_eq!(bus_name_suffix(42), "OmaSpotify.instance42");
     }
 }

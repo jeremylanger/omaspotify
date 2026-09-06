@@ -56,7 +56,7 @@ impl BackendConfig {
 
         let device_name = global
             .device_name
-            .unwrap_or_else(|| "Omarchy Spotify".to_string());
+            .unwrap_or_else(|| "OmaSpotify".to_string());
         let device_name = device_name.trim().to_string();
         if device_name.is_empty()
             || device_name.len() > 64
@@ -108,14 +108,14 @@ impl BackendConfig {
 }
 
 pub fn default_config_path() -> PathBuf {
-    config_home().join("omarchy-spotify/spotifyd.conf")
+    config_home().join("omaspotify/playback.conf")
 }
 
 pub fn default_socket_path() -> PathBuf {
     let runtime = env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc_getuid() })));
-    runtime.join("omarchy-spotify/backend.sock")
+    runtime.join("omaspotify/backend.sock")
 }
 
 fn config_home() -> PathBuf {
@@ -138,7 +138,7 @@ fn default_credentials_root() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
         .unwrap_or_else(|| PathBuf::from(".local/state"))
-        .join("omarchy-spotify")
+        .join("omaspotify")
 }
 
 #[cfg(unix)]
@@ -162,11 +162,11 @@ mod tests {
     #[test]
     fn reads_existing_spotifyd_shape() {
         let dir = std::env::temp_dir().join(format!(
-            "omarchy-spotify-config-test-{}",
+            "omaspotify-config-test-{}",
             std::process::id()
         ));
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("spotifyd.conf");
+        let path = dir.join("playback.conf");
         let mut file = fs::File::create(&path).unwrap();
         writeln!(
             file,
