@@ -28,4 +28,4 @@ Changes below start from the fork point. For the history of the original plugin,
   lines overall.
 - Moved the sleep timer and the lyrics-plugin flow out of Service.qml into their
   own files. The sleep timer now has 20 unit tests, where that logic previously
-  had none.
+  had none, and the last uncovered playback-decision helper is now tested too.

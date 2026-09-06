@@ -204,6 +204,34 @@ TestCase {
     compare(Api.VOLUME_FLUSH_MS, 80)
   }
 
+  function test_pendingRemoteDeviceMatches_onlyWhileTheHoldIsStillValid() {
+    var device = { id: "abc", name: "Kitchen", type: "Speaker" }
+    var pending = { device: device, expiresAt: 5000 }
+
+    verify(Api.pendingRemoteDeviceMatches(pending, device, 4999))
+    verify(!Api.pendingRemoteDeviceMatches(pending, device, 5000),
+      "the hold must not survive its own expiry")
+    verify(!Api.pendingRemoteDeviceMatches(pending, device, 6000))
+  }
+
+  function test_pendingRemoteDeviceMatches_rejectsMissingOrOddValues() {
+    var device = { id: "abc", name: "Kitchen", type: "Speaker" }
+    verify(!Api.pendingRemoteDeviceMatches(null, device, 0))
+    verify(!Api.pendingRemoteDeviceMatches({ expiresAt: 5000 }, device, 0))
+    verify(!Api.pendingRemoteDeviceMatches({ device: device, expiresAt: 5000 },
+      null, 0))
+    verify(!Api.pendingRemoteDeviceMatches({ device: device, expiresAt: "soon" },
+      device, 0))
+    verify(!Api.pendingRemoteDeviceMatches({ device: device, expiresAt: 5000 },
+      device, "now"))
+  }
+
+  function test_pendingRemoteDeviceMatches_needsTheSameDevice() {
+    var pending = { device: { id: "abc", type: "Speaker" }, expiresAt: 5000 }
+    verify(!Api.pendingRemoteDeviceMatches(pending,
+      { id: "different", type: "Speaker" }, 0))
+  }
+
   function test_shallowCopyAndAssign_copyWithoutSharingIdentity() {
     var source = { name: "Work", volume: 12 }
     var copy = Api.shallowCopy(source)
