@@ -236,14 +236,16 @@ The prerequisite for the UI overhaul. No behavior changes.
       can use it from outside `Panel.qml`
 - [x] Extract the 10 inline page Components into their own files. `setupPage` was the
       settings screen and is now `SettingsPage.qml`
-- [x] **Panel.qml: 6,636 → 4,421 lines**
 - [x] Guard the new boundary with `tests/test_page_interface.py`, wired into
       `scripts/test.sh` and CI
-- [ ] Extract the 6 popups out of `Panel.qml`
+- [x] Extract the 6 popups out of `Panel.qml` (`ShortcutHelpPopup`, `LyricsInstallPopup`,
+      `MediaContextMenu`, `PlaylistPicker`, `CreatePlaylistPopup`, `SleepPopup`).
+      `ContextMenuButton` moved into `MediaContextMenu.qml`, its only user
+- [x] **Panel.qml: 6,636 → 3,638 lines (45% smaller)**
 - [ ] Split `Service.qml` (4,073 lines) along its real seams: settings/session, playback
       state, library, playlists, search, devices/Connect, sleep timer, auth
-- [ ] Target: no file over ~800 lines (`Panel.qml`, `Service.qml`, `Api.js`,
-      `BarWidget.qml`, `DetailPage.qml` and `SettingsPage.qml` are still over)
+- [ ] Target: no file over ~800 lines (`Panel.qml`, `Service.qml`, `Api.js` and
+      `BarWidget.qml` are still over)
 
 **What extraction cost, and what caught it.** Moving the pages out of `Panel.qml` broke
 four things that `qmllint` did not report: three pages reached for ids that only exist

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guards the boundary between Panel.qml and the page files it loads.
+"""Guards the boundary between Panel.qml and the page and popup files it loads.
 
 The pages used to be written inside Panel.qml, where they could reach anything
 in that file's scope. They are separate files now and receive the panel through
@@ -15,7 +15,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PANEL = ROOT / "Panel.qml"
-PAGES = sorted(ROOT.glob("*Page.qml"))
+POPUPS = ["ShortcutHelpPopup", "LyricsInstallPopup", "MediaContextMenu",
+          "PlaylistPicker", "CreatePlaylistPopup", "SleepPopup"]
+# Pages take the panel as `page.panel`, popups as `popup.panel`.
+PARTS = [(p, "page") for p in sorted(ROOT.glob("*Page.qml"))]
+PARTS += [(ROOT / f"{n}.qml", "popup") for n in POPUPS]
+PAGES = [p for p, _ in PARTS]
 
 # Things every Item has, which a page may legitimately read off the panel.
 ITEM_MEMBERS = {
@@ -42,13 +47,15 @@ def panel_ids():
 
 
 class PageInterface(unittest.TestCase):
-    def test_pages_were_found(self):
+    def test_parts_were_found(self):
         self.assertTrue(PAGES, "no page files were found next to Panel.qml")
+        for path, _ in PARTS:
+            self.assertTrue(path.exists(), f"{path.name} is missing")
 
-    def test_every_panel_member_a_page_uses_exists(self):
+    def test_every_panel_member_a_part_uses_exists(self):
         available = panel_members()
-        for page in PAGES:
-            used = set(re.findall(r"\bpage\.panel\.(\w+)", page.read_text()))
+        for page, root in PARTS:
+            used = set(re.findall(rf"\b{root}\.panel\.(\w+)", page.read_text()))
             missing = sorted(used - available)
             self.assertFalse(
                 missing,
@@ -56,11 +63,11 @@ class PageInterface(unittest.TestCase):
                 f"but Panel.qml does not expose them",
             )
 
-    def test_no_page_reaches_into_the_panel_by_id(self):
+    def test_no_part_reaches_into_the_panel_by_id(self):
         ids = panel_ids()
-        for page in PAGES:
+        for page, root in PARTS:
             text = page.read_text()
-            local = set(re.findall(r"^\s*id:\s*(\w+)", text, re.M)) | {"page"}
+            local = set(re.findall(r"^\s*id:\s*(\w+)", text, re.M)) | {root}
             code = strip_strings(text)
             for name in sorted(ids - local):
                 match = re.search(r"(?<![\w.])" + re.escape(name) + r"(?![\w])", code)
@@ -71,8 +78,8 @@ class PageInterface(unittest.TestCase):
                     if match else "",
                 )
 
-    def test_every_page_takes_the_panel_the_same_way(self):
-        for page in PAGES:
+    def test_every_part_takes_the_panel_the_same_way(self):
+        for page, _ in PARTS:
             text = page.read_text()
             self.assertIn("property var panel: null", text,
                           f"{page.name} does not declare a panel property")

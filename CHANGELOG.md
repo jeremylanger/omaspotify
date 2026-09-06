@@ -24,3 +24,5 @@ Changes below start from the fork point. For the history of the original plugin,
   from 6,636 to 4,421 lines. The panel and its screens now talk through one
   explicit property instead of shared file scope.
 - Share the keyboard modifier rules between the full player and the mini-player.
+- Moved the six popups out of Panel.qml as well, taking it from 6,636 to 3,638
+  lines overall.
