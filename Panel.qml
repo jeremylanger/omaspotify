@@ -629,12 +629,7 @@ Item {
   }
 
   function applySequenceModifiers(sequence) {
-    var parsed = Api.parseShortcutSequence(sequence)
-    var flags = 0
-    if (parsed.ctrl) flags |= Qt.ControlModifier
-    if (parsed.shift) flags |= Qt.ShiftModifier
-    if (parsed.alt) flags |= Qt.AltModifier
-    heldModifierFlags = flags
+    heldModifierFlags = shortcutModifiers.flagsForSequence(sequence)
   }
 
   function latchShortcutMode(sequence) {
@@ -656,28 +651,20 @@ Item {
     else clearShortcutMode()
   }
 
-  function isHintModifierKey(key) {
-    return key === Qt.Key_Control || key === Qt.Key_Shift
-      || key === Qt.Key_Alt || key === Qt.Key_AltGr
-  }
 
-  function hintModifierFlag(key) {
-    if (key === Qt.Key_Control) return Qt.ControlModifier
-    if (key === Qt.Key_Shift) return Qt.ShiftModifier
-    if (key === Qt.Key_Alt || key === Qt.Key_AltGr) return Qt.AltModifier
-    return 0
-  }
+
+
 
   function noteHeldModifiers(event, pressed) {
     if (!event) return
-    heldModifierFlags = Api.shortcutModifierFlagsAfterEvent(event.modifiers,
-      pressed, heldModifierFlags, hintModifierFlag(event.key))
+    heldModifierFlags = shortcutModifiers.flagsAfterEvent(event.modifiers,
+      pressed, heldModifierFlags, event.key)
   }
 
   function considerShortcutModeKey(event, pressed) {
     noteHeldModifiers(event, pressed)
     if (!pressed || typingInField) return
-    if (isHintModifierKey(event.key) || event.key === Qt.Key_Tab
+    if (shortcutModifiers.isHintModifierKey(event.key) || event.key === Qt.Key_Tab
         || event.key === Qt.Key_Backtab || event.key === Qt.Key_F6
         || (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier
           | Qt.AltModifier)) !== 0)
@@ -2386,7 +2373,7 @@ Item {
       focus: true
       Keys.priority: Keys.BeforeItem
       Keys.onShortcutOverride: function(event) {
-        if (root.isHintModifierKey(event.key)) {
+        if (shortcutModifiers.isHintModifierKey(event.key)) {
           root.considerShortcutModeKey(event, true)
           event.accepted = true
           return
@@ -2403,7 +2390,7 @@ Item {
       }
       Keys.onPressed: function(event) {
         root.considerShortcutModeKey(event, true)
-        if (root.isHintModifierKey(event.key)) {
+        if (shortcutModifiers.isHintModifierKey(event.key)) {
           event.accepted = true
           return
         }
@@ -2418,7 +2405,7 @@ Item {
       }
       Keys.onReleased: function(event) {
         root.noteHeldModifiers(event, false)
-        if (root.isHintModifierKey(event.key)) event.accepted = true
+        if (shortcutModifiers.isHintModifierKey(event.key)) event.accepted = true
       }
 
       Shortcut {
@@ -2986,7 +2973,7 @@ Item {
         root.shortcutModeLatched = false
       }
       Keys.onShortcutOverride: function(event) {
-        if (root.isHintModifierKey(event.key) && !root.typingInField) {
+        if (shortcutModifiers.isHintModifierKey(event.key) && !root.typingInField) {
           root.considerShortcutModeKey(event, true)
           event.accepted = true
           return
@@ -3005,7 +2992,7 @@ Item {
       }
       Keys.onPressed: function(event) {
         root.considerShortcutModeKey(event, true)
-        if (root.isHintModifierKey(event.key) && !root.typingInField) {
+        if (shortcutModifiers.isHintModifierKey(event.key) && !root.typingInField) {
           event.accepted = true
           return
         }
@@ -3020,7 +3007,7 @@ Item {
       }
       Keys.onReleased: function(event) {
         root.noteHeldModifiers(event, false)
-        if (root.isHintModifierKey(event.key) && !root.typingInField)
+        if (shortcutModifiers.isHintModifierKey(event.key) && !root.typingInField)
           event.accepted = true
       }
       Keys.onEscapePressed: function(event) {
@@ -4343,6 +4330,10 @@ Item {
         }
       }
     }
+  }
+
+  ShortcutModifiers {
+    id: shortcutModifiers
   }
 
   Timer {
