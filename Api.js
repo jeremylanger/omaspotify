@@ -398,6 +398,23 @@ function normalizedShortcutPlayer(value) {
   return "Omarchy Music app"
 }
 
+// Spotify's own loudness targets are -11, -14 and -19 LUFS. librespot
+// normalises to its own target, so a level is a pregain offset from Normal.
+var VOLUME_LEVEL_PREGAIN_DB = { Loud: 3, Normal: 0, Quiet: -5 }
+
+function normalizedNormalizeVolume(value) {
+  return String(value || "On") === "Off" ? "Off" : "On"
+}
+
+function normalizedVolumeLevel(value) {
+  var level = String(value || "")
+  return VOLUME_LEVEL_PREGAIN_DB.hasOwnProperty(level) ? level : "Normal"
+}
+
+function normalizationPregainDb(level) {
+  return VOLUME_LEVEL_PREGAIN_DB[normalizedVolumeLevel(level)]
+}
+
 function normalizedShortcutHints(value) {
   return String(value || "On") === "Off" ? "Off" : "On"
 }

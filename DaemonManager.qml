@@ -17,6 +17,8 @@ Item {
   property string pluginDir: ""
   property string deviceName: "OmaSpotify"
   property int bitrateKbps: 320
+  property bool normalizeVolume: true
+  property int normalizationPregainDb: 0
   property string unitName: "omaspotify.service"
   property bool authenticationCancelled: false
   property bool mprisPresent: false
@@ -150,6 +152,8 @@ Item {
     // The blank third line explicitly clears any legacy per-app sink choice.
     // Omarchy's Audio panel remains the sole owner of desktop audio routing.
     configurationInput = String(deviceName) + "\n" + String(bitrateKbps) + "\n"
+      + (normalizeVolume ? "true" : "false") + "\n"
+      + String(normalizationPregainDb) + "\n"
     configurationBusy = true
     configWriter.command = [pluginDir + "/scripts/configure-playback.sh"]
     configWriter.running = true
@@ -225,6 +229,8 @@ Item {
 
   onDeviceNameChanged: requestConfiguration()
   onBitrateKbpsChanged: requestConfiguration()
+  onNormalizeVolumeChanged: requestConfiguration()
+  onNormalizationPregainDbChanged: requestConfiguration()
   onPluginDirChanged: {
     if (!pluginDir) return
     checkRequirements()

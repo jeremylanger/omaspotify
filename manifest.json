@@ -40,7 +40,9 @@
       "scrollBarText": "Off",
       "scrollSpeed": "1",
       "maxBarTextWidth": "240",
-      "audioQuality": "320 kbps"
+      "audioQuality": "320 kbps",
+      "normalizeVolume": "On",
+      "volumeLevel": "Normal"
     },
     "schema": [
       {
@@ -162,6 +164,29 @@
         ],
         "defaultValue": "320 kbps",
         "description": "Takes effect the next time playback starts."
+      },
+      {
+        "key": "normalizeVolume",
+        "type": "enum",
+        "label": "Normalize volume",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "On",
+        "description": "Play quiet and loud tracks at a similar level, so you do not reach for the volume between songs."
+      },
+      {
+        "key": "volumeLevel",
+        "type": "enum",
+        "label": "Volume level",
+        "options": [
+          "Loud",
+          "Normal",
+          "Quiet"
+        ],
+        "defaultValue": "Normal",
+        "description": "How loud normalized playback aims to be. Takes effect the next time playback starts."
       }
     ]
   }

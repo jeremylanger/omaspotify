@@ -298,9 +298,16 @@ worthwhile future work; it was previously unbounded scope access.
 
 Lossless is out (see Verified facts). These are the wins that are actually available.
 
-- [ ] **Volume normalization** toggle + pregain + Album/Track/Auto mode.
-      Headline audio feature: fixes the loudness gap vs the native app, ~5 config fields,
-      fully supported upstream, currently off by default
+- [x] **Volume normalization**, exposed as the same two controls native Spotify offers:
+      **Normalize volume** (On/Off, now **on** by default) and **Volume level**
+      (Loud/Normal/Quiet). The level maps to librespot's pregain using Spotify's own
+      published targets — -11/-14/-19 LUFS, so Loud is +3 dB and Quiet is -5 dB from
+      Normal. librespot's other five normalisation fields (type, method, threshold,
+      attack/release, knee) stay at their defaults; native Spotify exposes none of them.
+      Wired end to end: manifest → settings → `configure-playback.sh` → `playback.conf`
+      → `config.rs` → `PlayerConfig`. Verified with `omaspotify-backend check`
+- [x] Moved the audio cache out of `~/.cache/spotifyd` — a leftover from the removed
+      daemon — into `~/.cache/omaspotify/audio`. A Phase C rename that was missed
 - [ ] Expose `autoplay` in settings (already parsed, never surfaced)
 - [ ] Expose audio cache size + a Clear Cache action (backend already manages 1 GB)
 - [ ] Selectable audio backend — pipewire/alsa alongside pulseaudio (currently hardcoded)

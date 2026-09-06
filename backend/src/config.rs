@@ -20,6 +20,8 @@ struct GlobalConfig {
     no_audio_cache: Option<bool>,
     max_cache_size: Option<u64>,
     cache_path: Option<PathBuf>,
+    normalisation: Option<bool>,
+    normalisation_pregain_db: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +30,8 @@ pub struct BackendConfig {
     pub bitrate: Bitrate,
     pub bitrate_kbps: u16,
     pub autoplay: bool,
+    pub normalisation: bool,
+    pub normalisation_pregain_db: f64,
     pub audio_device: Option<String>,
     pub audio_cache: bool,
     pub max_cache_size: Option<u64>,
@@ -40,6 +44,8 @@ pub struct ConfigSummary<'a> {
     pub device_name: &'a str,
     pub bitrate_kbps: u16,
     pub autoplay: bool,
+    pub normalisation: bool,
+    pub normalisation_pregain_db: f64,
     pub audio_cache: bool,
     pub max_cache_size: Option<u64>,
     pub cache_root: &'a std::path::Path,
@@ -73,6 +79,15 @@ impl BackendConfig {
             value => bail!("unsupported bitrate {value}; expected 96, 160, or 320"),
         };
 
+        // Matches Spotify's Loud/Normal/Quiet levels, which sit within a few dB
+        // of each other. Anything wider is a mistake, not a preference.
+        let normalisation_pregain_db = global.normalisation_pregain_db.unwrap_or(0.0);
+        if !normalisation_pregain_db.is_finite()
+            || !(-15.0..=15.0).contains(&normalisation_pregain_db)
+        {
+            bail!("normalisation_pregain_db must be between -15 and 15");
+        }
+
         let backend = global.backend.unwrap_or_else(|| "pulseaudio".to_string());
         if backend != "pulseaudio" {
             bail!("unsupported audio backend {backend:?}; expected \"pulseaudio\"");
@@ -86,6 +101,8 @@ impl BackendConfig {
             bitrate,
             bitrate_kbps,
             autoplay: global.autoplay.unwrap_or(true),
+            normalisation: global.normalisation.unwrap_or(true),
+            normalisation_pregain_db,
             audio_device: global.device.filter(|value| !value.trim().is_empty()),
             audio_cache: !global.no_audio_cache.unwrap_or(false),
             max_cache_size: global.max_cache_size.or(Some(1_000_000_000)),
@@ -99,6 +116,8 @@ impl BackendConfig {
             device_name: &self.device_name,
             bitrate_kbps: self.bitrate_kbps,
             autoplay: self.autoplay,
+            normalisation: self.normalisation,
+            normalisation_pregain_db: self.normalisation_pregain_db,
             audio_cache: self.audio_cache,
             max_cache_size: self.max_cache_size,
             cache_root: &self.cache_root,
@@ -130,7 +149,7 @@ fn default_cache_root() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
         .unwrap_or_else(|| PathBuf::from(".cache"))
-        .join("spotifyd")
+        .join("omaspotify/audio")
 }
 
 fn default_credentials_root() -> PathBuf {
@@ -158,6 +177,58 @@ unsafe fn libc_getuid() -> u32 {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn write_config(name: &str, body: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("omaspotify-{name}-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("playback.conf");
+        let mut file = fs::File::create(&path).unwrap();
+        writeln!(file, "{body}").unwrap();
+        path
+    }
+
+    #[test]
+    fn audio_cache_lives_under_our_own_name() {
+        let root = default_cache_root();
+        assert!(root.ends_with("omaspotify/audio"), "got {}", root.display());
+    }
+
+    #[test]
+    fn normalisation_is_on_by_default_at_the_published_target() {
+        let path = write_config("norm-default", "[global]\ndevice_name=\"D\"");
+        let config = BackendConfig::load(&path).unwrap();
+        assert!(config.normalisation);
+        assert_eq!(config.normalisation_pregain_db, 0.0);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn normalisation_can_be_turned_off() {
+        let path = write_config("norm-off", "[global]\nnormalisation=false");
+        let config = BackendConfig::load(&path).unwrap();
+        assert!(!config.normalisation);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn pregain_carries_the_chosen_volume_level() {
+        for (body, expected) in [("3", 3.0), ("-5", -5.0), ("0", 0.0)] {
+            let path = write_config(
+                &format!("pregain{body}"),
+                &format!("[global]\nnormalisation_pregain_db={body}"),
+            );
+            let config = BackendConfig::load(&path).unwrap();
+            assert_eq!(config.normalisation_pregain_db, expected);
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    #[test]
+    fn pregain_outside_a_sane_range_is_rejected() {
+        let path = write_config("pregain-wild", "[global]\nnormalisation_pregain_db=40");
+        assert!(BackendConfig::load(&path).is_err());
+        fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn reads_existing_spotifyd_shape() {

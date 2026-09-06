@@ -68,6 +68,8 @@ Item {
   // Disclosure state for the width slider; deliberately not persisted.
   property bool barTextWidthExpanded: false
   property string draftAudioQuality: "320 kbps"
+  property bool draftNormalizeVolume: true
+  property string draftVolumeLevel: "Normal"
   property var contextItem: null
   property var contextSourceItems: []
   property string contextSourceUri: ""
@@ -155,6 +157,8 @@ Item {
     draftScrollSpeed = service.scrollSpeed
     draftMaxBarTextWidth = service.maxBarTextWidth
     draftAudioQuality = service.audioQuality
+    draftNormalizeVolume = service.normalizeVolume
+    draftVolumeLevel = service.volumeLevel
   }
 
   function saveSettings(showStatus) {
@@ -172,7 +176,9 @@ Item {
       scrollBarText: draftScrollBarText ? "On" : "Off",
       scrollSpeed: Api.normalizedScrollSpeed(draftScrollSpeed),
       maxBarTextWidth: Api.normalizedMaxBarTextWidth(draftMaxBarTextWidth),
-      audioQuality: draftAudioQuality
+      audioQuality: draftAudioQuality,
+      normalizeVolume: draftNormalizeVolume ? "On" : "Off",
+      volumeLevel: draftVolumeLevel
     }
     service.persistSettings(values)
     syncDraftSettings()
@@ -187,6 +193,21 @@ Item {
     draftAudioQuality = draftAudioQuality === "96 kbps" ? "160 kbps"
       : (draftAudioQuality === "160 kbps" ? "320 kbps" : "96 kbps")
     persistDraftSettings()
+  }
+
+  function toggleNormalizeVolume() {
+    draftNormalizeVolume = !draftNormalizeVolume
+    persistDraftSettings()
+  }
+
+  function cycleVolumeLevel() {
+    draftVolumeLevel = draftVolumeLevel === "Quiet" ? "Normal"
+      : (draftVolumeLevel === "Normal" ? "Loud" : "Quiet")
+    persistDraftSettings()
+  }
+
+  function volumeLevelLabel() {
+    return Api.normalizedVolumeLevel(draftVolumeLevel)
   }
 
   function cycleShortcutPlayer() {

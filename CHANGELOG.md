@@ -20,6 +20,10 @@ Changes below start from the fork point. For the history of the original plugin,
   cache, socket, keyring entry, backend binary and Spotify Connect device name,
   so it installs alongside the original instead of colliding with it.
 - Playback backends are now verified against this repository's own releases.
+- Added volume normalization, on by default, with a Loud/Normal/Quiet level in
+  Settings. Quiet and loud tracks now play at a similar level, which closes the
+  loudness gap against the official client.
+- Cached audio moved from ~/.cache/spotifyd to ~/.cache/omaspotify/audio.
 - Moved the ten player screens out of Panel.qml into their own files, taking it
   from 6,636 to 4,421 lines. The panel and its screens now talk through one
   explicit property instead of shared file scope.

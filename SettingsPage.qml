@@ -552,11 +552,29 @@ Item {
             tooltipText: "Change streaming quality"
             onClicked: page.panel.cycleAudioQuality()
           }
+
+          Button {
+            text: "Normalize volume · "
+              + (page.panel.draftNormalizeVolume ? "On" : "Off")
+            iconText: "󰕾"
+            foreground: page.panel.foreground
+            tooltipText: "Play quiet and loud tracks at a similar level"
+            onClicked: page.panel.toggleNormalizeVolume()
+          }
+
+          Button {
+            text: "Volume level · " + page.panel.volumeLevelLabel()
+            iconText: "󰝝"
+            foreground: page.panel.foreground
+            enabled: page.panel.draftNormalizeVolume
+            tooltipText: "How loud normalized playback aims to be"
+            onClicked: page.panel.cycleVolumeLevel()
+          }
         }
 
         Text {
           width: parent.width
-          text: "This computer stays visible in Spotify Connect while the player is open. After it closes, an empty receiver sleeps at the idle timeout; paused media stays available to resume. Use 0 minutes to keep this computer available even while the player is closed. Device name and audio quality changes apply the next time local playback starts."
+          text: "This computer stays visible in Spotify Connect while the player is open. After it closes, an empty receiver sleeps at the idle timeout; paused media stays available to resume. Use 0 minutes to keep this computer available even while the player is closed. Device name, audio quality and volume settings apply the next time local playback starts."
           color: page.panel.muted
           font.family: page.panel.fontFamily
           font.pixelSize: Style.font.bodySmall

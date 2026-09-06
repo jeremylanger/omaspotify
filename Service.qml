@@ -44,7 +44,9 @@ Item {
     scrollBarText: "Off",
     scrollSpeed: "1",
     maxBarTextWidth: "240",
-    audioQuality: "320 kbps"
+    audioQuality: "320 kbps",
+    normalizeVolume: "On",
+    volumeLevel: "Normal"
   })
   property var settings: Api.shallowCopy(defaultSettingValues)
 
@@ -69,6 +71,12 @@ Item {
       : (quality.indexOf("160") === 0 ? 160 : 320)
   }
   readonly property string audioQuality: bitrateKbps + " kbps"
+  readonly property bool normalizeVolume:
+    Api.normalizedNormalizeVolume(settings.normalizeVolume) === "On"
+  readonly property string volumeLevel:
+    Api.normalizedVolumeLevel(settings.volumeLevel)
+  readonly property int normalizationPregainDb:
+    Api.normalizationPregainDb(volumeLevel)
   property var searchHistory: []
   property var sessionState: ({})
   property bool sessionFileReady: false
@@ -446,7 +454,7 @@ Item {
     var keys = ["deviceName", "idleShutdownMinutes", "showMiniPlayer",
       "shortcutPlayer", "shortcutHints", "showTrackTitle", "showArtistName",
       "showPausedTrack", "scrollBarText", "scrollSpeed", "maxBarTextWidth",
-      "audioQuality"]
+      "audioQuality", "normalizeVolume", "volumeLevel"]
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i]
       if (source[key] !== undefined) next[key] = source[key]
@@ -470,6 +478,8 @@ Item {
     var quality = String(next.audioQuality || "320 kbps")
     next.audioQuality = quality.indexOf("96") === 0 ? "96 kbps"
       : (quality.indexOf("160") === 0 ? "160 kbps" : "320 kbps")
+    next.normalizeVolume = Api.normalizedNormalizeVolume(next.normalizeVolume)
+    next.volumeLevel = Api.normalizedVolumeLevel(next.volumeLevel)
     return next
   }
 
@@ -3758,6 +3768,8 @@ Item {
     pluginDir: root.pluginDir
     deviceName: root.deviceName
     bitrateKbps: root.bitrateKbps
+    normalizeVolume: root.normalizeVolume
+    normalizationPregainDb: root.normalizationPregainDb
     mprisPresent: root.hasLocalPlayer
   }
 

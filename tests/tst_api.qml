@@ -204,6 +204,38 @@ TestCase {
     compare(Api.VOLUME_FLUSH_MS, 80)
   }
 
+  function test_normalizedNormalizeVolume_defaultsToOn() {
+    compare(Api.normalizedNormalizeVolume("On"), "On")
+    compare(Api.normalizedNormalizeVolume("Off"), "Off")
+    compare(Api.normalizedNormalizeVolume(""), "On")
+    compare(Api.normalizedNormalizeVolume(null), "On")
+    compare(Api.normalizedNormalizeVolume("nonsense"), "On")
+  }
+
+  function test_normalizedVolumeLevel_acceptsOnlyTheThreeLevels() {
+    compare(Api.normalizedVolumeLevel("Loud"), "Loud")
+    compare(Api.normalizedVolumeLevel("Normal"), "Normal")
+    compare(Api.normalizedVolumeLevel("Quiet"), "Quiet")
+    compare(Api.normalizedVolumeLevel(""), "Normal")
+    compare(Api.normalizedVolumeLevel(null), "Normal")
+    compare(Api.normalizedVolumeLevel("Very Loud"), "Normal")
+  }
+
+  // Spotify publishes its targets as -11, -14 and -19 LUFS. librespot
+  // normalises to its own target, so the level is expressed as a pregain
+  // offset from Normal.
+  function test_normalizationPregainDb_matchesSpotifysLoudnessTargets() {
+    compare(Api.normalizationPregainDb("Normal"), 0)
+    compare(Api.normalizationPregainDb("Loud"), 3)
+    compare(Api.normalizationPregainDb("Quiet"), -5)
+  }
+
+  function test_normalizationPregainDb_fallsBackToNormal() {
+    compare(Api.normalizationPregainDb(""), 0)
+    compare(Api.normalizationPregainDb(null), 0)
+    compare(Api.normalizationPregainDb("Deafening"), 0)
+  }
+
   function test_pendingRemoteDeviceMatches_onlyWhileTheHoldIsStillValid() {
     var device = { id: "abc", name: "Kitchen", type: "Speaker" }
     var pending = { device: device, expiresAt: 5000 }

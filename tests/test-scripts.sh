@@ -149,6 +149,26 @@ grep -qx 'max_cache_size = 1000000000' "$test_root/config/omaspotify/playback.co
 ! grep -q '^device[[:space:]]*=' "$test_root/config/omaspotify/playback.conf"
 grep -qx 'autoplay = true' "$test_root/config/omaspotify/playback.conf"
 
+# Normalisation is written alongside the device name and bitrate.
+printf '%s\n' 'Desk speakers' 320 false -5 |
+  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
+grep -qx 'normalisation = false' "$test_root/config/omaspotify/playback.conf"
+grep -qx 'normalisation_pregain_db = -5' "$test_root/config/omaspotify/playback.conf"
+printf '%s\n' 'Desk speakers' 320 true 3 |
+  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
+grep -qx 'normalisation = true' "$test_root/config/omaspotify/playback.conf"
+grep -qx 'normalisation_pregain_db = 3' "$test_root/config/omaspotify/playback.conf"
+
+# An out-of-range pregain or a non-boolean flag must be refused.
+for bad_norm in 'true 40' 'maybe 0'; do
+  set +e
+  printf '%s\n' 'Desk speakers' 320 ${bad_norm} |
+    XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
+  bad_norm_status=$?
+  set -e
+  [[ $bad_norm_status -eq 3 ]]
+done
+
 printf '%s\n' "Renamed speakers" |
   XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
 grep -qx 'device_name = "Renamed speakers"' "$test_root/config/omaspotify/playback.conf"
@@ -514,6 +534,8 @@ jq -e '(.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
   "$source_root/manifest.json" >/dev/null
 grep -qx 'section=left' "$source_root/scripts/install-local.sh"
 grep -qx 'bitrate = 320' "$source_root/config/playback.conf"
+grep -qx 'normalisation = true' "$source_root/config/playback.conf"
+grep -qx 'normalisation_pregain_db = 0' "$source_root/config/playback.conf"
 grep -qx 'no_audio_cache = false' "$source_root/config/playback.conf"
 grep -qx 'max_cache_size = 1000000000' "$source_root/config/playback.conf"
 ! grep -q 'Conflicts=' "$source_root/systemd/omaspotify.service"
