@@ -296,6 +296,17 @@ variables. Both directions are proven to fail the test when broken.
 The lesson for the remaining work: **after extracting a block, the file it came from is as
 likely to be broken as the block itself.**
 
+**Re-verified against a restarted shell, after the fix.** All ten pages, the shortcuts
+popup, the context menu (including arrow-key navigation and executing an action — the
+queued track showed up in Spotify's own queue), the playlist picker, and the lyrics flow
+(the Omasing window opens with the right track). Local playback runs through our backend
+throughout — Spotify's own client reports "Playing on OmaSpotify". No QML errors from this
+plugin since the fix landed.
+
+`SleepPopup.qml` is the one surface not driven by hand: its timer button sits in the footer
+and the keyboard cursor would not reach it. Its logic lives in `SleepTimer.qml`, which has
+20 unit tests, and the popup itself loads without error.
+
 **Why the page tests are static.** A runtime test that builds each page would be better,
 but the pages use Quickshell UI types that cannot load in the offscreen test runner. That
 is the real reason `Panel.qml`, `Service.qml` and `BarWidget.qml` have no tests upstream —
