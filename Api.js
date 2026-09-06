@@ -544,12 +544,6 @@ function pendingSliderVolumeShouldHold(reportedSlider, pending, now) {
     > SLIDER_VOLUME_ACK_TOLERANCE
 }
 
-function displayedSliderVolume(reportedSlider, pending, now) {
-  if (pendingSliderVolumeShouldHold(reportedSlider, pending, now))
-    return clampUnit(pending.slider)
-  return clampUnit(reportedSlider)
-}
-
 function shouldRememberVolume(value) {
   return clampUnit(value) > MUTE_THRESHOLD
 }

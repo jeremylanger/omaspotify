@@ -196,11 +196,8 @@ TestCase {
   function test_pendingSliderVolumeHoldsUntilPlayerAcknowledgesIt() {
     var pending = { slider: 0.55, expiresAt: 9000 }
     verify(Api.pendingSliderVolumeShouldHold(0.5, pending, 2000))
-    compare(Api.displayedSliderVolume(0.5, pending, 2000), 0.55)
     verify(!Api.pendingSliderVolumeShouldHold(0.55, pending, 2000))
-    compare(Api.displayedSliderVolume(0.55, pending, 2000), 0.55)
     verify(!Api.pendingSliderVolumeShouldHold(0.5, pending, 9000))
-    compare(Api.displayedSliderVolume(0.5, pending, 9000), 0.5)
     verify(!Api.pendingSliderVolumeShouldHold(0.5, null, 2000))
     compare(Api.SEARCH_DEBOUNCE_MS, 600)
     compare(Api.SEARCH_REQUEST_TIMEOUT_MS, 8000)
