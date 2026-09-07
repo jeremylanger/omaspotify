@@ -232,6 +232,35 @@ TestCase {
     compare(Object.keys(Api.recentContextPlayTimes({ items: "no" })).length, 0)
   }
 
+  // Spotify only hands us the last 50 plays, but top tracks and top artists
+  // reveal what has actually been listened to over roughly four weeks. Those
+  // count as a play inside that window, dated at the far edge of it so a
+  // genuinely newer save still wins.
+  function test_recentListenWindow_datesTopItemsAtTheEdgeOfTheWindow() {
+    var now = 1000000000
+    var windowMs = 28 * 24 * 3600 * 1000
+    var out = Api.recentListenWindow({
+      items: [{ album: { uri: "spotify:album:x" } }]
+    }, { items: [{ uri: "spotify:artist:y" }] }, now, 28)
+    compare(out["spotify:album:x"], now - windowMs)
+    compare(out["spotify:artist:y"], now - windowMs)
+  }
+
+  function test_recentListenWindow_toleratesJunk() {
+    compare(Object.keys(Api.recentListenWindow(null, null, 0, 28)).length, 0)
+    compare(Object.keys(Api.recentListenWindow({}, {}, 0, 28)).length, 0)
+    compare(Object.keys(Api.recentListenWindow(
+      { items: [{ album: null }, {}] }, { items: [{}] }, 1, 28)).length, 0)
+  }
+
+  function test_mergedPlayTimes_prefersTheNewerSignal() {
+    var exact = { "a": 500 }
+    var window = { "a": 100, "b": 100 }
+    var out = Api.mergedPlayTimes(exact, window)
+    compare(out["a"], 500, "a precise play beats the window estimate")
+    compare(out["b"], 100)
+  }
+
   function test_librarySortModes_areTheFourWeSupport() {
     compare(Api.librarySortModes(), ["library", "recent", "added", "alpha"])
     compare(Api.normalizedLibrarySort("alpha"), "alpha")

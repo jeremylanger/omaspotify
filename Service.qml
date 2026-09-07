@@ -102,6 +102,14 @@ Item {
   readonly property string loginProgress: loginProgressText()
 
   property var recentContextPlays: ({})
+  property var topTracksPayload: null
+  property var topArtistsPayload: null
+  property bool recentListeningLoading: false
+  property bool recentListeningLoaded: false
+  // Exact plays only reach back 50 items, so the top lists fill in what has
+  // been listened to over the past few weeks.
+  readonly property var libraryPlayTimes: Api.mergedPlayTimes(recentContextPlays,
+    Api.recentListenWindow(topTracksPayload, topArtistsPayload, Date.now(), 28))
   readonly property var pinnedUris: {
     var pins = sessionState && sessionState.pinnedUris
     return Array.isArray(pins) ? pins : []
@@ -1073,6 +1081,7 @@ Item {
   }
 
   function loadSidebarPlaylists() {
+    loadRecentListening()
     if (!playlistsLoaded && !playlistsLoading) loadPlaylists(false)
     if (!savedAlbumsLoaded && !savedAlbumsLoading) loadSavedAlbums(false)
     if (!followedArtistsLoaded && !followedArtistsLoading) loadFollowedArtists(false)
@@ -1133,7 +1142,7 @@ Item {
 
   readonly property var sidebarItems: Api.sortedLibraryItems(
     sidebarSource(playlists, savedAlbums, followedArtists, savedShows),
-    librarySort, recentContextPlays, pinnedUris)
+    librarySort, libraryPlayTimes, pinnedUris)
 
   function sidebarPlaylists() {
     return sidebarItems
@@ -1152,6 +1161,35 @@ Item {
       for (var i = 0; i < group.length; i++) rows.push(group[i])
     }
     return rows
+  }
+
+  // Roughly the last four weeks of listening, which is how far past the
+  // 50-play ceiling we can see.
+  function loadRecentListening() {
+    if (recentListeningLoading || recentListeningLoaded) return
+    recentListeningLoading = true
+    var expected = dataSerial
+    var pending = 2
+    var settle = function() {
+      pending--
+      if (pending > 0) return
+      root.recentListeningLoading = false
+      root.recentListeningLoaded = true
+    }
+    spotifyApi.request("GET", "/me/top/tracks",
+      { limit: 50, time_range: "short_term" }, null,
+      function(status, payload, error) {
+        if (expected !== root.dataSerial) return
+        if (!error) root.topTracksPayload = payload
+        settle()
+      })
+    spotifyApi.request("GET", "/me/top/artists",
+      { limit: 50, time_range: "short_term" }, null,
+      function(status, payload, error) {
+        if (expected !== root.dataSerial) return
+        if (!error) root.topArtistsPayload = payload
+        settle()
+      })
   }
 
   function togglePinnedItem(item) {
@@ -3407,6 +3445,10 @@ Item {
     savedUrisBusyRevision++
     recentTracks = []
     topTracks = []
+    topTracksPayload = null
+    topArtistsPayload = null
+    recentListeningLoaded = false
+    recentListeningLoading = false
     topArtists = []
     homeLoaded = false
     homeRequestsPending = 0

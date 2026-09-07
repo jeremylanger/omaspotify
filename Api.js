@@ -423,6 +423,43 @@ function recentContextPlayTimes(payload) {
   return times
 }
 
+// Spotify caps recently-played at 50 plays, which is often only a day or two.
+// Top tracks and top artists cover roughly four weeks, so anything in them was
+// listened to inside that window. Date those at the far edge of the window: it
+// lifts them above older saves without pretending we know the exact moment.
+function recentListenWindow(topTracks, topArtists, nowMs, windowDays) {
+  var now = Number(nowMs) || 0
+  var days = Math.max(1, Number(windowDays) || 28)
+  var edge = now - days * 24 * 3600 * 1000
+  var times = {}
+  var tracks = topTracks && Array.isArray(topTracks.items) ? topTracks.items : []
+  for (var i = 0; i < tracks.length; i++) {
+    var album = tracks[i] && tracks[i].album
+    var albumUri = album ? String(album.uri || "") : ""
+    if (albumUri) times[albumUri] = edge
+  }
+  var artists = topArtists && Array.isArray(topArtists.items) ? topArtists.items : []
+  for (var j = 0; j < artists.length; j++) {
+    var artistUri = artists[j] ? String(artists[j].uri || "") : ""
+    if (artistUri) times[artistUri] = edge
+  }
+  return times
+}
+
+// An exact play time always beats the window estimate.
+function mergedPlayTimes(exact, estimated) {
+  var out = {}
+  var from = estimated && typeof estimated === "object" ? estimated : {}
+  var key
+  for (key in from) if (from.hasOwnProperty(key)) out[key] = from[key]
+  var precise = exact && typeof exact === "object" ? exact : {}
+  for (key in precise) {
+    if (!precise.hasOwnProperty(key)) continue
+    if (!out.hasOwnProperty(key) || precise[key] > out[key]) out[key] = precise[key]
+  }
+  return out
+}
+
 function librarySortModes() {
   return LIBRARY_SORT_MODES.slice()
 }

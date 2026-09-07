@@ -106,7 +106,20 @@ Two gaps remain, both from the 50-play ceiling:
 - Native put Prehistoric Planet above Ashley and Owen despite an older save date,
   so it knows that album was played more recently than we can see
 
-Closing either would need play history deeper than Spotify exposes.
+Partly closed since. `GET /me/top/tracks` and `/me/top/artists` with
+`time_range=short_term` cover roughly four weeks, far past the 50-play ceiling —
+50 tracks spanning 37 distinct albums on the test account. Anything appearing
+there was listened to inside that window, so it is dated at the window's far edge:
+enough to lift it above older saves, without inventing a precise moment.
+
+Measured effect: "Everlight", saved eleven months ago but in current top tracks,
+moved from roughly 40th to 12th. The native client places it 8th.
+
+What still differs, and why it cannot be fixed: the native client knows the exact
+last play of everything. We know exact times for 50 plays, a four-week yes/no for
+the rest, and nothing at all beyond that. So an album saved three weeks ago and
+never played can still outrank one listened to last week, because the save has a
+real date and the listen only has "sometime in the last four weeks".
 
 ## What this means for sorting
 
