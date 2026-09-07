@@ -284,9 +284,9 @@ TestCase {
   function test_mergedPlayTimes_prefersTheNewerSignal() {
     var exact = { "a": 500 }
     var window = { "a": 100, "b": 100 }
-    var out = Api.mergedPlayTimes(exact, window)
-    compare(out["a"], 500, "a precise play beats the window estimate")
-    compare(out["b"], 100)
+    var out = Api.mergedPlayTimes(exact, ({}), window)
+    compare(Api.playTimeOf(out["a"]), 500, "a precise play beats the window estimate")
+    compare(Api.playTimeOf(out["b"]), 100)
   }
 
   function test_librarySortModes_areTheFourWeSupport() {
@@ -379,6 +379,692 @@ TestCase {
     ]
     var out = Api.sortedLibraryItems(items, "recent", { "u:b": 9000 }, [])
     compare([out[0].name, out[1].name], ["Played just now", "Saved long ago"])
+  }
+
+  // Concurrency alone still lets background work fire in a burst. Spacing the
+  // dispatches is what keeps a cold start under Spotify's rate limit.
+  function test_backgroundPacing_spacesDispatches() {
+    compare(Api.backgroundStartDelay(0, 1000, 500), 0, "first one goes now")
+    compare(Api.backgroundStartDelay(1000, 1000, 500), 500, "too soon, wait")
+    compare(Api.backgroundStartDelay(1000, 1300, 500), 200)
+    compare(Api.backgroundStartDelay(1000, 1500, 500), 0, "spacing satisfied")
+    compare(Api.backgroundStartDelay(1000, 9000, 500), 0)
+  }
+
+  // The library index can wait a few seconds. Whatever someone just opened
+  // should have the whole budget until it has had a moment to load.
+  function test_backgroundStandsAsideAfterSomethingIsOpened() {
+    compare(Api.backgroundDispatchDelay(0, 9500, 10000, 500), 2500,
+      "opened half a second ago, so background holds off")
+    compare(Api.backgroundDispatchDelay(0, 6000, 10000, 500), 0,
+      "the moment has passed")
+    compare(Api.backgroundDispatchDelay(9800, 0, 10000, 500), 300,
+      "its own spacing still applies")
+    compare(Api.backgroundDispatchDelay(9800, 9500, 10000, 500), 2500,
+      "whichever wait is longer wins")
+    compare(Api.backgroundDispatchDelay(0, 0, 10000, 500), 0)
+  }
+
+  // One early try is worth it in case the refusal has slack in it. Five in a
+  // row just spends the retries and shows an error instead of the page.
+  function test_openedPageGetsOneEarlyTryThenWaitsItsTurn() {
+    var opened = { method: "GET", priority: "interactive", rateLimitRetries: 0 }
+    verify(Api.jobMayRunDuringCooldown(opened, false))
+    verify(!Api.jobMayRunDuringCooldown(opened, true),
+      "one try per refusal, however many pages are waiting")
+    verify(!Api.jobMayRunDuringCooldown(
+      { method: "GET", priority: "interactive", rateLimitRetries: 1 }, false),
+      "refused once, so it stops pushing")
+    verify(!Api.jobMayRunDuringCooldown({ method: "GET" }, false),
+      "ordinary work waits")
+    verify(Api.jobMayRunDuringCooldown({ method: "PUT" }, false),
+      "a button someone pressed is not background")
+    verify(!Api.jobMayRunDuringCooldown(null, false))
+  }
+
+  // A refusal often comes from the shared budget rather than from us, and it
+  // can last twenty seconds. Waiting all of that out leaves an opened page
+  // blank, so a page someone is watching pauses briefly and then tries.
+  function test_openedPageWaitsAMomentRatherThanTheWholeCooldown() {
+    compare(Api.foregroundCooldownMs(1000, 21000, 1000, 1500), 1500,
+      "a pause, not nothing")
+    compare(Api.foregroundCooldownMs(2000, 21000, 1000, 1500), 500)
+    compare(Api.foregroundCooldownMs(2500, 21000, 1000, 1500), 0,
+      "then it goes, even though Spotify is still cross")
+    compare(Api.foregroundCooldownMs(1000, 1200, 1000, 1500), 200,
+      "a short pause is honoured in full")
+    compare(Api.foregroundCooldownMs(30000, 21000, 1000, 1500), 0,
+      "no pause left to serve")
+  }
+
+  // The budget is shared with every other app using this client ID, so it
+  // cannot be known ahead of time. Each refusal costs about twenty seconds of
+  // everything stopping, so the gap only ever widens within a run.
+  function test_backgroundSpacing_widensWithEveryRefusal() {
+    compare(Api.backgroundSpacingForRefusals(0), 500)
+    compare(Api.backgroundSpacingForRefusals(1), 1000)
+    compare(Api.backgroundSpacingForRefusals(2), 2000)
+    compare(Api.backgroundSpacingForRefusals(4), 8000)
+    compare(Api.backgroundSpacingForRefusals(9), 8000, "there is a ceiling")
+    compare(Api.backgroundSpacingForRefusals(-3), 500, "nonsense starts over")
+  }
+
+  // Reading every liked song is a hundred requests. Starting that over on each
+  // launch is a bill the shared budget cannot pay.
+  function test_savedTrackCrawl_resumesWhereItStopped() {
+    var text = Api.encodePlayHistory({
+      savedTracksOffset: 2500, savedTracksNewest: 1700 })
+    var back = Api.parsePlayHistoryRecord(text)
+    compare(back.savedTracksOffset, 2500)
+    compare(back.savedTracksNewest, 1700,
+      "the newest date seen so far survives, or the mark cannot move")
+    compare(Api.parsePlayHistoryRecord("{}").savedTracksOffset, 0,
+      "an unknown record starts at the beginning")
+  }
+
+  // Refetching the whole library on every launch is ~30 requests nobody needs.
+  function test_libraryCache_isTrustedWhileItIsStillFresh() {
+    var hour = 3600000
+    verify(Api.libraryCacheIsFresh(1000, 1000 + hour, 6 * hour))
+    verify(!Api.libraryCacheIsFresh(1000, 1000 + 7 * hour, 6 * hour))
+    verify(!Api.libraryCacheIsFresh(0, 1000, 6 * hour), "no stamp means refetch")
+    verify(!Api.libraryCacheIsFresh(9999999, 1000, 6 * hour),
+      "a stamp from the future is not trusted")
+  }
+
+  function test_libraryCache_carriesWhenItWasFetched() {
+    var text = Api.encodeLibraryCache([{ uri: "p" }], [], [], [], 4242)
+    compare(Api.parseLibraryCache(text).fetchedAt, 4242)
+    compare(Api.parseLibraryCache("nonsense").fetchedAt, 0)
+  }
+
+  // Ordering the queue is not enough: background work can still hold every
+  // slot, so some are kept back for whatever the person does next.
+  function test_backgroundQuota_leavesSlotsForForegroundWork() {
+    compare(Api.backgroundInFlightLimit(4), 2,
+      "background stays narrow so the whole burst does not trip Spotify's limit")
+    compare(Api.backgroundInFlightLimit(2), 1)
+    compare(Api.backgroundInFlightLimit(1), 1, "never zero, or nothing loads")
+  }
+
+  function test_dequeue_skipsBackgroundWhenItsQuotaIsFull() {
+    var queue = [
+      { id: "bg1", method: "GET", priority: "background" },
+      { id: "bg2", method: "GET", priority: "background" },
+      { id: "page", method: "GET" }
+    ]
+    compare(Api.dequeueApiJob(queue, true).job.id, "bg1", "normally first wins")
+    compare(queue.length, 3, "the caller's queue is left alone")
+
+    var limited = Api.dequeueApiJob(queue, false)
+    compare(limited.job.id, "page", "background is passed over when full")
+    compare(limited.queue.length, 2)
+    compare(limited.queue[0].id, "bg1", "the skipped work stays queued")
+
+    var onlyBackground = Api.dequeueApiJob([
+      { id: "bg", method: "GET", priority: "background" }], false)
+    compare(onlyBackground.job, null, "nothing runnable rather than a wrong pick")
+  }
+
+  // A single "finished in N ms" hides where the time went. Split it so a slow
+  // call can be blamed on the queue, the token refresh, or the network.
+  function test_requestTimingLine_showsWhereTheTimeWent() {
+    var line = Api.requestTimingLine("GET", "/artists/abc",
+      { queuedMs: 120, authMs: 22600, wireMs: 264 },
+      { inFlight: 6, background: 4, queued: 3, priority: "background" })
+    verify(line.indexOf("GET /artists/abc") >= 0)
+    verify(line.indexOf("22984 ms") >= 0, "the total is the sum")
+    verify(line.indexOf("queue 120") >= 0)
+    verify(line.indexOf("auth 22600") >= 0)
+    verify(line.indexOf("wire 264") >= 0)
+    verify(line.indexOf("in-flight 6") >= 0)
+    verify(line.indexOf("bg 4") >= 0, "background slots in use are visible too")
+    verify(line.indexOf("queued 3") >= 0)
+    verify(line.indexOf("background") >= 0)
+  }
+
+  function test_requestTimingLine_copesWithMissingParts() {
+    var line = Api.requestTimingLine("GET", "/me", ({}), ({}))
+    verify(line.indexOf("0 ms") >= 0)
+    verify(line.indexOf("normal") >= 0, "no priority reads as normal")
+  }
+
+  function test_requestTimingLine_hidesSecrets() {
+    var line = Api.requestTimingLine("GET", "/me?access_token=abc123",
+      { wireMs: 1 }, ({}))
+    verify(line.indexOf("abc123") < 0)
+  }
+
+  // The sidebar mixes four kinds of thing, so it can be narrowed to one.
+  function test_libraryTypeFilter_narrowsToOneKind() {
+    var rows = [
+      { uri: "p", type: "playlist", name: "P" },
+      { uri: "a", type: "artist", name: "A" },
+      { uri: "b", type: "album", name: "B" },
+      { uri: "s", type: "show", name: "S" }
+    ]
+    compare(Api.filterLibraryType(rows, "all").length, 4)
+    compare(Api.filterLibraryType(rows, "playlist").length, 1)
+    compare(Api.filterLibraryType(rows, "playlist")[0].name, "P")
+    compare(Api.filterLibraryType(rows, "show")[0].name, "S")
+    compare(Api.filterLibraryType(rows, "nonsense").length, 4,
+      "an unknown filter shows everything rather than nothing")
+    compare(Api.filterLibraryType(null, "artist").length, 0)
+  }
+
+  function test_libraryTypeFilter_normalizesAndCycles() {
+    compare(Api.normalizedLibraryFilter("album"), "album")
+    compare(Api.normalizedLibraryFilter("bogus"), "all")
+    compare(Api.normalizedLibraryFilter(undefined), "all")
+    compare(Api.libraryFilterModes().length, 5)
+    compare(Api.libraryFilterModes()[0], "all")
+  }
+
+  // Spotify has no artist bio, but it does say how many followers and which
+  // genres, which is worth showing.
+  function test_artist_carriesFollowersAndGenres() {
+    var artist = Api.normalizeContext({ type: "artist", id: "a", uri: "ar:a",
+      name: "Someone", followers: { total: 11745879 },
+      genres: ["french house", "electronic"], popularity: 84 }, 96)
+    compare(artist.followers, 11745879)
+    compare(artist.genres.join(", "), "french house, electronic")
+    compare(artist.popularity, 84)
+  }
+
+  function test_artistSubtitle_readsFollowersAndGenres() {
+    compare(Api.artistDetailLine({ followers: 11745879,
+      genres: ["french house", "electronic", "electro", "extra"] }),
+      "11.7M followers · french house, electronic, electro")
+    compare(Api.artistDetailLine({ followers: 1200, genres: [] }), "1,200 followers")
+    compare(Api.artistDetailLine({ followers: 0, genres: ["ambient"] }), "ambient")
+    compare(Api.artistDetailLine(null), "")
+  }
+
+  function test_followerCount_readsAtAGlance() {
+    compare(Api.compactCount(999), "999")
+    compare(Api.compactCount(1200), "1,200")
+    compare(Api.compactCount(11745879), "11.7M")
+    compare(Api.compactCount(1500000000), "1.5B")
+    compare(Api.compactCount(45300), "45.3K")
+  }
+
+  // The play record keeps only the newest time per thing, so day counts are
+  // tallied separately as plays arrive, with a watermark to avoid double
+  // counting the same play on the next fetch.
+  function test_playDays_countsEachPlayOnce() {
+    var page = { items: [
+      { played_at: "2026-09-06T19:56:00Z" },
+      { played_at: "2026-09-06T18:01:00Z" },
+      { played_at: "2026-09-05T16:30:00Z" }
+    ] }
+    var first = Api.countedPlayDays(page, 0)
+    compare(first.newest, Date.parse("2026-09-06T19:56:00Z"))
+    var total = 0
+    for (var k in first.days) total += first.days[k]
+    compare(total, 3)
+
+    var again = Api.countedPlayDays(page, first.newest)
+    compare(JSON.stringify(again.days), "{}", "nothing is counted twice")
+  }
+
+  function test_playDays_mergeAddsRatherThanReplaces() {
+    var merged = Api.mergeDayCounts({ "2026-09-06": 3 }, { "2026-09-06": 2, "2026-09-07": 1 })
+    compare(merged["2026-09-06"], 5)
+    compare(merged["2026-09-07"], 1)
+    compare(JSON.stringify(Api.mergeDayCounts(null, null)), "{}")
+  }
+
+  // The heatmap is a grid of whole weeks ending on the week you are in.
+  function test_heatmap_buildsWholeWeeksEndingToday() {
+    var end = Date.parse("2026-09-09T12:00:00Z")
+    var grid = Api.heatmapWeeks({ }, end, 4)
+    compare(grid.length, 4)
+    compare(grid[0].length, 7, "every column is a full week")
+    for (var w = 0; w < grid.length; w++)
+      for (var d = 0; d < 7; d++)
+        compare(grid[w][d].count, 0)
+  }
+
+  function test_heatmap_shadesByHowMuchYouListened() {
+    compare(Api.heatmapLevel(0), 0)
+    compare(Api.heatmapLevel(1), 1)
+    compare(Api.heatmapLevel(3), 2)
+    compare(Api.heatmapLevel(8), 3)
+    compare(Api.heatmapLevel(40), 4)
+  }
+
+  function test_heatmap_putsCountsOnTheRightDay() {
+    var days = {}
+    days[Api.playDayKey(Date.parse("2026-09-08T10:00:00"))] = 5
+    var grid = Api.heatmapWeeks(days, Date.parse("2026-09-09T12:00:00"), 3)
+    var found = 0
+    for (var w = 0; w < grid.length; w++)
+      for (var d = 0; d < 7; d++)
+        if (grid[w][d].count === 5) found++
+    compare(found, 1, "the day with plays is the only shaded cell")
+  }
+
+  // A finished episode should start again from the beginning, not from its end.
+  function test_podcastResume_ignoresAFinishedEpisode() {
+    compare(Api.podcastResumeMs({ resumeMs: 42000, fullyPlayed: false }), 42000)
+    compare(Api.podcastResumeMs({ resumeMs: 42000, fullyPlayed: true }), 0)
+    compare(Api.podcastResumeMs({ resumeMs: 0 }), 0)
+    compare(Api.podcastResumeMs(null), 0)
+  }
+
+  function test_playbackBody_doesNotResumeAFinishedEpisode() {
+    var done = { kind: "item", type: "episode", uri: "spotify:episode:e",
+      resumeMs: 42000, fullyPlayed: true }
+    compare(Api.playbackBody(done, [], "").position_ms, undefined)
+    var part = { kind: "item", type: "episode", uri: "spotify:episode:e",
+      resumeMs: 42000, fullyPlayed: false }
+    compare(Api.playbackBody(part, [], "").position_ms, 42000)
+  }
+
+  // Podcast jumps clamp to the episode rather than running off either end.
+  function test_podcastSkip_staysInsideTheEpisode() {
+    compare(Api.skipToSeconds(100, 30, 600), 130)
+    compare(Api.skipToSeconds(100, -15, 600), 85)
+    compare(Api.skipToSeconds(5, -15, 600), 0, "never before the start")
+    compare(Api.skipToSeconds(590, 30, 600), 600, "never past the end")
+    compare(Api.skipToSeconds(100, 30, 0), 130, "unknown length does not clamp")
+  }
+
+  // Every column can be reversed, the way a playlist sorts in the real client.
+  function test_filteredSorted_reversesAnyColumn() {
+    var rows = [
+      { name: "b", subtitle: "z", durationMs: 300 },
+      { name: "a", subtitle: "y", durationMs: 100 },
+      { name: "c", subtitle: "x", durationMs: 200 }
+    ]
+    compare(Api.filteredSorted(rows, "", "name", false).map(function(i) {
+      return i.name }).join(""), "abc")
+    compare(Api.filteredSorted(rows, "", "name", true).map(function(i) {
+      return i.name }).join(""), "cba")
+    compare(Api.filteredSorted(rows, "", "duration", false).map(function(i) {
+      return i.durationMs }).join(","), "100,200,300")
+    compare(Api.filteredSorted(rows, "", "duration", true).map(function(i) {
+      return i.durationMs }).join(","), "300,200,100")
+  }
+
+  function test_filteredSorted_datesStillDefaultToNewestFirst() {
+    var rows = [{ name: "old", addedAt: "2020-01-01" }, { name: "new", addedAt: "2024-01-01" }]
+    compare(Api.filteredSorted(rows, "", "date", false)[0].name, "new")
+    compare(Api.filteredSorted(rows, "", "date", true)[0].name, "old")
+    compare(Api.filteredSorted(rows, "", "date-asc", false)[0].name, "old",
+      "the old key still means oldest first")
+  }
+
+  function test_filteredSorted_keepsUndatedRowsLastBothWays() {
+    var rows = [{ name: "none" }, { name: "dated", addedAt: "2024-01-01" }]
+    compare(Api.filteredSorted(rows, "", "date", false)[0].name, "dated")
+    compare(Api.filteredSorted(rows, "", "date", true)[0].name, "dated")
+  }
+
+  // Artwork is fetched from Spotify's CDN on every launch. A stable name per
+  // URL lets it be kept on disk instead.
+  function test_artworkCache_namesAreStableAndSafe() {
+    var a = Api.artworkCacheName("https://i.scdn.co/image/ab67616d0000b273abc")
+    var b = Api.artworkCacheName("https://i.scdn.co/image/ab67616d0000b273abc")
+    var c = Api.artworkCacheName("https://i.scdn.co/image/ab67616d0000b273abd")
+    compare(a, b, "the same url always gives the same file name")
+    verify(a !== c)
+    verify(/^[0-9a-z]+\.img$/.test(a), "safe to use as a file name")
+    compare(Api.artworkCacheName(""), "")
+    compare(Api.artworkCacheName(null), "")
+  }
+
+  function test_artworkCache_collectsTheUrlsWorthKeeping() {
+    var items = [{ imageUrl: "u1" }, { imageUrl: "" }, null, { imageUrl: "u2" },
+      { imageUrl: "u1" }]
+    compare(Api.artworkUrls(items, ({})).join(","), "u1,u2", "each url once")
+    compare(Api.artworkUrls(items, { "u1": true }).join(","), "u2",
+      "already-kept artwork is not fetched again")
+    compare(Api.artworkUrls(null, ({})).length, 0)
+  }
+
+  // Library crawling must never make a page you just opened wait.
+  function test_apiPriority_backgroundWorkYieldsToAnythingYouAskedFor() {
+    compare(Api.apiJobPriority({ method: "GET", priority: "background" }), -1)
+    compare(Api.apiJobPriority({ method: "GET" }), 0)
+    compare(Api.apiJobPriority({ method: "GET", priority: "interactive" }), 1)
+    compare(Api.apiJobPriority({ method: "PUT", priority: "background" }), 2,
+      "a mutation is still a mutation")
+
+    var queue = Api.enqueueApiJob([], { method: "GET", id: "crawl", priority: "background" })
+    queue = Api.enqueueApiJob(queue, { method: "GET", id: "crawl2", priority: "background" })
+    queue = Api.enqueueApiJob(queue, { method: "GET", id: "artist" })
+    compare(queue[0].id, "artist", "opening a page jumps every background job")
+    compare(queue[1].id, "crawl")
+    compare(queue[2].id, "crawl2")
+  }
+
+  // Searching by artist name returns other artists' work, so it had to be
+  // filtered and re-paged. Spotify answers both questions directly.
+  function test_artistCatalog_usesTheDirectEndpointsInsteadOfSearch() {
+    var artist = { id: "a1", type: "artist", name: "Someone" }
+    compare(Api.artistTopTracksRequest(artist).path, "/artists/a1/top-tracks")
+    compare(Api.artistTopTracksRequest(artist).query.market, "from_token")
+    compare(Api.artistTopTracksRequest(null), null)
+
+    var albums = Api.artistAlbumsRequest(artist)
+    compare(albums.path, "/artists/a1/albums")
+    compare(albums.query.limit, 50)
+    verify(albums.query.include_groups.indexOf("album") >= 0)
+    verify(albums.query.include_groups.indexOf("single") >= 0)
+  }
+
+  function test_artistCatalog_readsTheTopTracksReply() {
+    var payload = { tracks: [
+      { id: "t1", type: "track", name: "One", uri: "spotify:track:t1",
+        duration_ms: 1000, artists: [{ name: "Someone", uri: "ar:1" }],
+        album: { name: "Album", uri: "al:1", images: [] } }
+    ] }
+    var out = Api.normalizeArtistTopTracks(payload, 96)
+    compare(out.length, 1)
+    compare(out[0].name, "One")
+    compare(JSON.stringify(Api.normalizeArtistTopTracks(null, 96)), "[]")
+  }
+
+  // Paging one request at a time is slow when the first reply already tells us
+  // how many pages there are.
+  function test_pageOffsets_askForEveryRemainingPageAtOnce() {
+    compare(JSON.stringify(Api.pageOffsets(130, 50, 50)), "[50,100]")
+    compare(JSON.stringify(Api.pageOffsets(50, 50, 50)), "[]", "one page is the whole thing")
+    compare(JSON.stringify(Api.pageOffsets(0, 50, 0)), "[]")
+    compare(Api.pageOffsets(9000, 50, 50).length, 40, "a runaway total is still bounded")
+  }
+
+  // A new field in the record cannot be filled by an incremental crawl, so an
+  // older record has to be read from the top once.
+  function test_playHistory_reReadsEverythingAfterTheRecordGrows() {
+    var older = JSON.stringify({ version: 3, plays: {}, savedTracksThrough: 999 })
+    compare(Api.parsePlayHistoryRecord(older).savedTracksThrough, 0,
+      "an older record forgets its watermark so the crawl runs in full")
+    var current = Api.encodePlayHistory({ savedTracksThrough: 999,
+      likedByArtist: { "ar:a": ["t1"] } })
+    compare(Api.parsePlayHistoryRecord(current).savedTracksThrough, 999)
+    compare(Api.parsePlayHistoryRecord(current).likedByArtist["ar:a"].join(","), "t1")
+  }
+
+  // The sidebar is the same library every launch, so it is kept on disk and
+  // shown before Spotify answers.
+  function test_libraryCache_survivesARoundTrip() {
+    var text = Api.encodeLibraryCache([{ uri: "p1" }], [{ uri: "al1" }],
+      [{ uri: "ar1" }], [{ uri: "s1" }])
+    var back = Api.parseLibraryCache(text)
+    compare(back.playlists[0].uri, "p1")
+    compare(back.savedAlbums[0].uri, "al1")
+    compare(back.followedArtists[0].uri, "ar1")
+    compare(back.savedShows[0].uri, "s1")
+  }
+
+  function test_libraryCache_ignoresRubbish() {
+    var empty = Api.parseLibraryCache("not json")
+    compare(empty.playlists.length, 0)
+    compare(empty.savedAlbums.length, 0)
+    compare(Api.parseLibraryCache('{"playlists":"nope"}').playlists.length, 0)
+  }
+
+  // The artist page grows a third column only when there is something to put
+  // in it, and never squeezes a column below a usable width.
+  function test_artistColumns_splitEvenlyAndKeepAFloor() {
+    compare(Api.evenColumnWidth(620, 10, 3), 200)
+    compare(Api.evenColumnWidth(310, 10, 2), 150)
+    compare(Api.evenColumnWidth(10, 10, 3), 80, "never narrower than the floor")
+    compare(Api.evenColumnWidth(620, 10, 0), 620)
+  }
+
+  // Spotify has no "my liked songs by this artist" endpoint, so the crawl that
+  // already reads every liked song builds the index as it goes.
+  function test_likedIndex_groupsLikedTrackIdsUnderEachArtist() {
+    var page = { items: [
+      { track: { id: "t1", artists: [{ uri: "ar:a" }, { uri: "ar:b" }] } },
+      { track: { id: "t2", artists: [{ uri: "ar:a" }] } }
+    ] }
+    var out = Api.likedTrackIdsByArtist(page)
+    compare(out["ar:a"].join(","), "t1,t2")
+    compare(out["ar:b"].join(","), "t1")
+  }
+
+  function test_likedIndex_skipsRowsWithNoTrackOrNoArtist() {
+    compare(JSON.stringify(Api.likedTrackIdsByArtist(null)), "{}")
+    compare(JSON.stringify(Api.likedTrackIdsByArtist(
+      { items: [{ track: { artists: [{ uri: "ar:a" }] } }, { track: { id: "t" } }] })), "{}")
+  }
+
+  function test_likedIndex_mergesWithoutDuplicatingOrGrowingForever() {
+    var merged = Api.mergeLikedIndex({ "ar:a": ["t1", "t2"] },
+      { "ar:a": ["t2", "t3"], "ar:b": ["t9"] }, 10)
+    compare(merged["ar:a"].join(","), "t1,t2,t3", "already-known ids are not repeated")
+    compare(merged["ar:b"].join(","), "t9")
+    compare(Api.mergeLikedIndex({ "ar:a": ["t1", "t2", "t3"] }, ({}), 2)["ar:a"].join(","),
+      "t1,t2", "the cap keeps the oldest known ids rather than churning")
+  }
+
+  function test_likedIndex_dropsATrackYouUnlike() {
+    var out = Api.withoutLikedTrack({ "ar:a": ["t1", "t2"], "ar:b": ["t1"] }, "t1")
+    compare(out["ar:a"].join(","), "t2")
+    compare(out["ar:b"].length, 0)
+  }
+
+  function test_likedIndex_batchesIdsIntoRequestSizedGroups() {
+    compare(JSON.stringify(Api.idBatches(["a", "b", "c"], 2)), '[["a","b"],["c"]]')
+    compare(JSON.stringify(Api.idBatches([], 2)), "[]")
+    compare(JSON.stringify(Api.idBatches(["a"], 0)), '[["a"]]')
+  }
+
+  // Playlists and artists carry no date of their own, so we work one out from
+  // the rest of the library: a liked song, a saved album, a playlist edit.
+  function test_touchDates_datesArtistsByTheNewestSongYouLiked() {
+    var page = { items: [
+      { added_at: "2020-01-01T00:00:00Z", track: { album: { uri: "spotify:album:old" },
+        artists: [{ uri: "spotify:artist:a" }] } },
+      { added_at: "2024-06-01T00:00:00Z", track: { album: { uri: "spotify:album:new" },
+        artists: [{ uri: "spotify:artist:a" }, { uri: "spotify:artist:b" }] } }
+    ] }
+    var out = Api.touchDatesFromSavedTracks(page)
+    compare(Api.playTimeOf(out["spotify:artist:a"]), Date.parse("2024-06-01T00:00:00Z"))
+    compare(Api.playSourceOf(out["spotify:artist:a"]), "liked")
+    compare(Api.playTimeOf(out["spotify:artist:b"]), Date.parse("2024-06-01T00:00:00Z"))
+    compare(Api.playTimeOf(out["spotify:album:old"]), Date.parse("2020-01-01T00:00:00Z"))
+  }
+
+  function test_touchDates_datesArtistsByTheAlbumsYouSaved() {
+    var page = { items: [{ added_at: "2023-03-03T00:00:00Z",
+      album: { uri: "spotify:album:x", artists: [{ uri: "spotify:artist:c" }] } }] }
+    var out = Api.touchDatesFromSavedAlbums(page)
+    compare(Api.playTimeOf(out["spotify:artist:c"]), Date.parse("2023-03-03T00:00:00Z"))
+    compare(Api.playSourceOf(out["spotify:artist:c"]), "saved")
+  }
+
+  function test_touchDates_ignoreRowsWithNoDateOrNoUri() {
+    compare(JSON.stringify(Api.touchDatesFromSavedTracks(null)), "{}")
+    compare(JSON.stringify(Api.touchDatesFromSavedAlbums({ items: [{ album: {} }] })), "{}")
+    compare(JSON.stringify(Api.touchDatesFromSavedTracks(
+      { items: [{ added_at: "nonsense", track: { artists: [{ uri: "u" }] } }] })), "{}")
+  }
+
+  // A played track also dates its album and everyone on it, not just the
+  // playlist it came from.
+  function test_recentPlays_dateTheAlbumAndArtistsToo() {
+    var page = { items: [{ played_at: "2026-01-02T03:04:05Z",
+      context: { uri: "spotify:playlist:p" },
+      track: { album: { uri: "spotify:album:al" }, artists: [{ uri: "spotify:artist:ar" }] } }] }
+    var out = Api.recentContextPlayTimes(page)
+    var at = Date.parse("2026-01-02T03:04:05Z")
+    compare(out["spotify:playlist:p"], at)
+    compare(out["spotify:album:al"], at)
+    compare(out["spotify:artist:ar"], at)
+  }
+
+  // Only playlists you own can be dated this way: a stranger editing their
+  // playlist is not you touching it.
+  function test_playlistEdit_onlyLooksAtPlaylistsYouOwn() {
+    var mine = { id: "p1", uri: "spotify:playlist:p1", ownerId: "me", snapshotId: "s1", total: 40 }
+    var theirs = { id: "p2", uri: "spotify:playlist:p2", ownerId: "you", snapshotId: "s2", total: 40 }
+    var q = Api.playlistEditRequest(mine, "me", ({}))
+    compare(q.path, "/playlists/p1/tracks")
+    compare(q.query.offset, 39, "the last track added is the newest edit")
+    compare(q.query.limit, 1)
+    compare(Api.playlistEditRequest(theirs, "me", ({})), null)
+    compare(Api.playlistEditRequest(mine, "me", { "p1": { snapshot: "s1", at: 5 } }), null,
+      "an unchanged playlist is not asked about twice")
+    compare(Api.playlistEditRequest({ id: "p3", ownerId: "me", total: 0 },
+      "me", ({})), null, "an empty playlist has nothing to date")
+  }
+
+  function test_playlistEdit_readsTheDateOutOfTheReply() {
+    compare(Api.playlistEditDate({ items: [{ added_at: "2024-03-23T21:13:24Z" }] }),
+      Date.parse("2024-03-23T21:13:24Z"))
+    compare(Api.playlistEditDate({ items: [] }), 0)
+    compare(Api.playlistEditDate(null), 0)
+  }
+
+  // Liked songs come back newest first, so a watermark stops us re-reading
+  // thousands of them on every launch.
+  function test_savedTrackWatermark_stopsOnceWeReachWhatWeAlreadyHad() {
+    var page = { items: [{ added_at: "2026-05-05T00:00:00Z" },
+      { added_at: "2026-04-04T00:00:00Z" }] }
+    compare(Api.newestAddedAt(page), Date.parse("2026-05-05T00:00:00Z"))
+    compare(Api.pageReachesWatermark(page, Date.parse("2026-04-20T00:00:00Z")), true)
+    compare(Api.pageReachesWatermark(page, Date.parse("2026-01-01T00:00:00Z")), false)
+    compare(Api.pageReachesWatermark(page, 0), false)
+  }
+
+  // The watermark is what we had before this run started. Moving it as pages
+  // arrive would stop the run on its own second page.
+  function test_savedTrackCrawl_doesNotStopItselfOnFreshPages() {
+    var page1 = { next: "u", items: [{ added_at: "2026-05-05T00:00:00Z" }] }
+    var page2 = { next: "u", items: [{ added_at: "2026-04-04T00:00:00Z" }] }
+    var run = Api.savedTrackCrawlStep(page1, 0, 0)
+    compare(run.done, false)
+    compare(run.nextOffset, 50)
+    compare(run.newest, Date.parse("2026-05-05T00:00:00Z"))
+    compare(Api.savedTrackCrawlStep(page2, 50, 0).done, false,
+      "page one's own dates must not end the run")
+  }
+
+  function test_savedTrackCrawl_stopsAtWhatWeAlreadyHadOrTheLastPage() {
+    var page = { next: "u", items: [{ added_at: "2026-04-04T00:00:00Z" }] }
+    compare(Api.savedTrackCrawlStep(page, 50, Date.parse("2026-04-20T00:00:00Z")).done, true)
+    compare(Api.savedTrackCrawlStep({ items: [] }, 50, 0).done, true, "no next page")
+  }
+
+  function test_libraryDates_preferARealPlayOverAnInferredDate() {
+    var merged = Api.mergedPlayTimes({ "u": 500 },
+      { "u": { at: 900, source: "liked" } }, ({}))
+    compare(Api.playTimeOf(merged["u"]), 900, "the newer date wins whichever it is")
+    compare(Api.playSourceOf(merged["u"]), "liked")
+
+    var tie = Api.mergedPlayTimes({ "u": 900 }, { "u": { at: 900, source: "liked" } }, ({}))
+    compare(Api.playSourceOf(tie["u"]), "played", "a real play settles a tie")
+  }
+
+
+  // Spotify only ever hands back the last 50 plays, so we keep our own running
+  // record and add each fresh batch to it.
+  function test_playHistory_keepsOlderPlaysSpotifyNoLongerReturns() {
+    var stored = { "a": 100, "b": 200 }
+    var fresh = { "b": 900, "c": 300 }
+    var out = Api.mergePlayHistory(stored, fresh)
+    compare(out["a"], 100, "a play Spotify has forgotten is still remembered")
+    compare(out["b"], 900, "a newer play replaces the older one")
+    compare(out["c"], 300)
+  }
+
+  function test_playHistory_neverGoesBackwards() {
+    var out = Api.mergePlayHistory({ "a": 900 }, { "a": 100 })
+    compare(out["a"], 900)
+  }
+
+  function test_playHistory_keepsEverythingItHasEverSeen() {
+    var out = Api.mergePlayHistory({ "old": 1, "mid": 2 }, { "new": 3 })
+    compare(out["old"], 1, "nothing is ever thrown away")
+    compare(out["mid"], 2)
+    compare(out["new"], 3)
+  }
+
+  function test_playHistory_ignoresJunkEntries() {
+    var out = Api.mergePlayHistory({ "a": 0, "b": "nope", "c": 5 }, null)
+    compare(out["a"], undefined)
+    compare(out["b"], undefined)
+    compare(out["c"], 5)
+  }
+
+  function test_playHistory_survivesAFileRoundTrip() {
+    var text = Api.encodePlayHistory({ plays: { "a": 100 } })
+    compare(Api.parsePlayHistory(text)["a"], 100)
+    compare(JSON.stringify(Api.parsePlayHistory("not json")), "{}")
+    compare(JSON.stringify(Api.parsePlayHistory("")), "{}")
+    compare(JSON.stringify(Api.parsePlayHistory('{"plays":[1,2]}')), "{}")
+  }
+
+  function test_mergedPlayTimes_saysWhetherATimeWasMeasuredOrEstimated() {
+    var merged = Api.mergedPlayTimes({ "a": 900 }, ({}), { "a": 100, "b": 200 })
+    compare(Api.playTimeOf(merged["a"]), 900)
+    compare(Api.playSourceOf(merged["a"]), "played")
+    compare(Api.playTimeOf(merged["b"]), 200)
+    compare(Api.playSourceOf(merged["b"]), "listened")
+  }
+
+  function test_librarySort_stillAcceptsPlainNumbersForPlayTimes() {
+    var out = Api.sortedLibraryItems(sortFixture, "recent", { "spotify:playlist:b": 9000 }, [])
+    compare(out[0].name, "Beta")
+    compare(out[0].sortSource, "played")
+  }
+
+  function test_librarySort_marksEstimatedListensApart() {
+    var merged = Api.mergedPlayTimes(({}), ({}), { "spotify:playlist:b": 9000 })
+    var out = Api.sortedLibraryItems(sortFixture, "recent", merged, [])
+    compare(out[0].name, "Beta")
+    compare(out[0].sortSource, "listened")
+  }
+
+
+  // Each row carries the number it was ranked on, so the sidebar can show it.
+  // Two rows sharing a date must not trade places between renders. The
+  // comparator has to answer with library order, never with nothing.
+  function test_librarySort_isDeterministicWhenDatesTie() {
+    var tied = [
+      { uri: "u:a", name: "A", addedAt: 5000 },
+      { uri: "u:b", name: "B", addedAt: 5000 },
+      { uri: "u:c", name: "C", addedAt: 5000 }
+    ]
+    var first = Api.sortedLibraryItems(tied, "added", ({}), [])
+    compare(first.map(function(i) { return i.name }).join(","), "A,B,C")
+    for (var pass = 0; pass < 5; pass++) {
+      var again = Api.sortedLibraryItems(tied, "added", ({}), [])
+      compare(again.map(function(i) { return i.name }).join(","), "A,B,C",
+        "the same input always gives the same order")
+    }
+    compare(first[1].sortIndex, 1, "library position is part of the key")
+  }
+
+  function test_librarySort_tiedRecentsFallBackToLibraryOrderToo() {
+    var tied = [{ uri: "u:a", name: "A" }, { uri: "u:b", name: "B" }]
+    var plays = { "u:a": 900, "u:b": 900 }
+    var out = Api.sortedLibraryItems(tied, "recent", plays, [])
+    compare(out.map(function(i) { return i.name }).join(","), "A,B")
+  }
+
+  function test_librarySort_reportsTheValueItRankedOn() {
+    var played = { "spotify:playlist:b": 4242 }
+    var out = Api.sortedLibraryItems(sortFixture, "recent", played, [])
+    var beta = out.filter(function(i) { return i.name === "Beta" })[0]
+    compare(beta.sortValue, 4242)
+    compare(beta.sortSource, "played")
+
+    var byAdded = Api.sortedLibraryItems(sortFixture, "added", ({}), [])
+    var alpha = byAdded.filter(function(i) { return i.name === "alpha" })[0]
+    compare(alpha.sortValue, 3000)
+    compare(alpha.sortSource, "added")
+  }
+
+  function test_librarySort_marksRowsWithNothingToRankOn() {
+    var out = Api.sortedLibraryItems([{ uri: "u", name: "N" }], "recent", ({}), [])
+    compare(out[0].sortValue, 0)
+    compare(out[0].sortSource, "none")
   }
 
   function test_librarySort_pinnedItemsComeFirstInPinOrder() {
@@ -502,10 +1188,10 @@ TestCase {
   }
 
   function test_apiRequestQueue_ordersMutationsAndSkipsAborted() {
-    compare(Api.API_MAX_IN_FLIGHT, 2)
+    compare(Api.API_MAX_IN_FLIGHT, 4)
     compare(Api.API_MAX_RATE_LIMIT_RETRIES, 4)
-    compare(Api.apiInFlightLimit(false), 2)
-    compare(Api.apiInFlightLimit(true), 1)
+    compare(Api.apiInFlightLimit(false), 4)
+    compare(Api.apiInFlightLimit(true), 1, "a rate limited account drops to one")
     verify(Api.shouldRetryRateLimit(0))
     verify(Api.shouldRetryRateLimit(3))
     verify(!Api.shouldRetryRateLimit(4))

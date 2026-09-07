@@ -144,6 +144,16 @@ Item {
           }
           Text {
             width: parent.width
+            visible: page.isArtist && text !== ""
+            text: page.panel.service
+              ? Api.artistDetailLine(page.panel.service.detailItem) : ""
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
+          Text {
+            width: parent.width
             text: page.panel.service && page.panel.service.detailItem
               ? String(page.panel.service.detailItem.description
                 || page.panel.service.detailItem.releaseDate || "") : ""
@@ -250,11 +260,17 @@ Item {
       Row {
         id: artistLists
         width: parent.width
-        height: parent.height
+        height: parent.height - relatedStrip.height
+          - (relatedStrip.visible ? parent.spacing : 0)
         spacing: Style.space(10)
 
+        readonly property bool showLiked: page.panel.service
+          && page.panel.service.artistLikedSongs.length > 0
+        readonly property real columnWidth: Api.evenColumnWidth(width, spacing,
+          showLiked ? 3 : 2)
+
         Column {
-          width: Math.max(80, (parent.width - parent.spacing) / 2)
+          width: artistLists.columnWidth
           height: parent.height
           spacing: Style.space(5)
 
@@ -297,8 +313,7 @@ Item {
         }
 
         Column {
-          width: Math.max(80, parent.width - parent.spacing
-            - Math.max(80, (parent.width - parent.spacing) / 2))
+          width: artistLists.columnWidth
           height: parent.height
           spacing: Style.space(5)
 
@@ -345,6 +360,7 @@ Item {
           MediaRow {
             id: artistThisIsRow
             objectName: "artist-thisis"
+            service: page.panel.service
             width: parent.width
             height: visible ? implicitHeight : 0
             visible: page.panel.service && page.panel.service.artistThisIsPlaylist
@@ -370,6 +386,87 @@ Item {
               active: page.panel.shortcutHintsActive
                 && page.panel.navHintFor("page", "detail-thisis") !== ""
               navHint: page.panel.navHintFor("page", "detail-thisis")
+            }
+          }
+        }
+
+        Column {
+          width: artistLists.columnWidth
+          height: parent.height
+          spacing: Style.space(5)
+          visible: artistLists.showLiked
+
+          Text {
+            id: artistLikedHeading
+            width: parent.width
+            text: "YOUR LIKED SONGS"
+            color: page.panel.foreground
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          MediaCollection {
+            width: parent.width
+            height: Math.max(30, parent.height - artistLikedHeading.height
+              - parent.spacing)
+            keyboardListId: "list-liked-songs"
+            service: page.panel.service
+            sourceItems: page.panel.service ? page.panel.service.artistLikedSongs : []
+            showFilter: false
+            showQueue: true
+            showSave: true
+            loading: page.panel.service && page.panel.service.artistLikedSongsLoading
+            emptyMessage: "No liked songs by this artist."
+            onActivated: function(item, items, uri) {
+              page.panel.activateMedia(item, items, uri)
+            }
+            onOpened: function(item) { page.panel.openItem(item) }
+            onQueued: function(item) { if (page.panel.service) page.panel.service.addToQueue(item) }
+            onPlaylistRequested: function(item) { page.panel.openPlaylistPicker(item) }
+            onSaveToggled: function(item) { if (page.panel.service) page.panel.service.toggleSaved(item) }
+            onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
+              page.panel.openMediaContext(item, x, y, items, uri, index, playbackUri)
+            }
+          }
+        }
+      }
+
+      Column {
+        id: relatedStrip
+        width: parent.width
+        spacing: Style.space(3)
+        visible: page.panel.service && page.panel.service.artistRelated.length > 0
+        height: visible ? implicitHeight : 0
+
+        Text {
+          text: "FANS ALSO LIKE"
+          color: page.panel.foreground
+          font.family: page.panel.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Row {
+          spacing: Style.space(4)
+
+          Repeater {
+            model: page.panel.service ? page.panel.service.artistRelated : []
+
+            SidebarRow {
+              required property var modelData
+              width: Style.space(52)
+              height: Style.space(52)
+              item: modelData
+              grid: true
+              thumbnailSize: Style.space(30)
+              fallbackGlyph: "󰠃"
+              service: page.panel.service
+              foreground: page.panel.foreground
+              accent: page.panel.accent
+              muted: page.panel.muted
+              fontFamily: page.panel.fontFamily
+              onActivated: page.panel.openItem(modelData)
             }
           }
         }
@@ -515,6 +612,7 @@ Item {
                   / page.searchColumnCount)
                 height: parent.height
                 itemData: modelData
+                service: page.panel.service
                 foreground: page.panel.foreground
                 accent: page.panel.accent
                 fontFamily: page.panel.fontFamily
@@ -589,7 +687,7 @@ Item {
       contextUri: page.panel.service && page.panel.service.detailItem
         ? page.panel.service.detailItem.uri : ""
       showQueue: true
-      showFilter: false
+      showFilter: true
       showSort: true
       showSave: true
       browseContexts: true

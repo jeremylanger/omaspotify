@@ -506,3 +506,84 @@ All three can coexist **as long as identities don't collide**.
 - A/B recipe: same track, same quality; toggle normalization in each to reproduce the
   loudness-gap experiment; watch `pactl list sink-inputs` to confirm which client is audible
 - Only one of the three should be *playing* at a time
+
+## Phase G — pages, speed and the listening record
+
+Done, all verified against the real account and the running app.
+
+**Speed**
+
+- Artist page **4,676 ms to 584 ms** by replacing name-searches with
+  `/artists/{id}/top-tracks` and `/artists/{id}/albums`
+- A **background request tier** so library crawling never delays a page you
+  opened
+- Requests in flight raised from 2 to 4; library pages fetched in parallel by
+  offset with per-page retry
+- The library is **cached to disk** and drawn before Spotify answers
+- **Artwork cached to disk** (993 files, 7.5 MiB)
+- Sidebar rebuilds coalesced, which is what actually stopped the flicker
+
+**Pages**
+
+- **Now playing** — new, `Alt+Shift+N`
+- **Your listening** — new, `Alt+Shift+I`. A day-by-day heatmap built from the
+  play record the app keeps itself, plus top artists and songs over three
+  ranges
+- **Home** — a New releases tab
+- **Artist** — followers and genres, a liked-songs column, "Fans also like"
+- **Playlists** — filtering enabled, and every sort column reverses
+
+**Podcasts**
+
+- Back 15 / forward 30 replace previous/next while an episode plays
+- A finished episode no longer resumes at its own end
+
+Playback speed is **not possible**: no Web API endpoint exists, and doing it in
+the engine means resampling with time-stretching, or everything plays chipmunk.
+
+**Rate limiting — the artist page that took 15 seconds**
+
+Measured against the real account. Every request now logs where its time went
+(`queue`, `auth`, `wire`), which is what made this findable.
+
+- The wire time was never the problem: 27-300 ms throughout. A slow page was
+  always **queue** time, and queue time was always a 429 cooldown. One refusal
+  paused every request for 10-24 seconds
+- We share ncspot's client id, so the budget is spent by other apps too. A
+  refusal arrived within seconds of a cold start after **seven minutes of total
+  silence** — that traffic was not ours
+- What was ours: the liked-songs crawl is **105 of the 163 requests** a first
+  run makes, and it started over from zero on every launch
+
+Fixed:
+
+- The gap between background requests **doubles with every refusal** and stays
+  wide for the rest of the run. The budget is shared, so it cannot be guessed
+  ahead of time
+- The liked-songs crawl **resumes where it stopped** instead of re-reading
+  everything
+- Background work **stands aside for three seconds** after anything you open
+- Pages someone is waiting on (a detail page, Home, the queue) are marked
+  interactive. One of them gets an **early try per refusal** — one, however
+  many are waiting — and then waits its turn rather than hammering
+- An aborted background request now hands its slot back; it used to leak one,
+  which would eventually stall the crawl for good
+
+Result on a brand-new artist page, **14-23 s before**:
+
+- Quiet account: **50-225 ms**
+- Six opened in a row while Spotify refused nine times in seventy seconds:
+  three landed in 76-225 ms, three waited 2.2-6.9 s for a real cooldown
+
+Nothing reached fifteen seconds again. The refusals now land on background
+work instead of on the page someone opened.
+
+This is as far as client-side scheduling goes. The remaining slowness is the
+shared client id, not our scheduling.
+
+## Still open
+
+- Now playing has no lyrics surface yet
+- The heatmap only goes back as far as the app has been running
+- `BENCHMARK.md` predates this work; a like-for-like rerun needs a shell with
+  no third-party plugins loaded

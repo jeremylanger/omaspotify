@@ -18,6 +18,7 @@ BorderSurface {
   property bool hasCursor: false
   property int thumbnailSize: Style.space(32)
   property string fallbackGlyph: "󰲸"
+  property var service: null
 
   readonly property bool pinned: !!(item && item.pinned)
   readonly property string label: item ? String(item.name || "Untitled") : ""
@@ -49,19 +50,24 @@ BorderSurface {
   Component {
     id: artworkPart
 
-    Item {
+    BorderSurface {
       width: row.thumbnailSize
       height: row.thumbnailSize
+      radius: Style.spacing.labelGap
+      color: Style.normalFillFor(row.foreground, row.accent)
+      borderSpec: Border.controlSpec("normal", row.foreground, row.accent)
 
       Image {
         id: art
         anchors.fill: parent
-        source: row.item && row.item.imageUrl ? row.item.imageUrl : ""
+        anchors.margins: Style.space(2)
+        source: row.service && row.item && row.item.imageUrl
+          ? row.service.artworkFor(row.item.imageUrl)
+          : (row.item && row.item.imageUrl ? row.item.imageUrl : "")
         sourceSize.width: 128
         sourceSize.height: 128
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        cache: false
         visible: status === Image.Ready
       }
 
@@ -156,5 +162,6 @@ BorderSurface {
       horizontalAlignment: Text.AlignHCenter
       elide: Text.ElideRight
     }
+
   }
 }

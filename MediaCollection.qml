@@ -13,6 +13,7 @@ Item {
   property var sourceItems: []
   property string filterText: ""
   property string sortKey: "default"
+  property bool sortDescending: false
   property string contextUri: ""
   property bool showFilter: true
   property bool showSort: showFilter
@@ -52,13 +53,18 @@ Item {
   property real dragSceneY: 0
   property int dragAutoScrollDirection: 0
 
-  readonly property var visibleItems: Api.filteredSorted(sourceItems, filterText, sortKey)
+  readonly property var visibleItems: Api.filteredSorted(sourceItems, filterText,
+    sortKey, sortDescending)
+
+  // Whatever this list shows is worth keeping on disk, so a rebuilt row redraws
+  // from a local file rather than the CDN.
+  onVisibleItemsChanged: if (root.service) root.service.keepArtwork(visibleItems)
   readonly property bool playbackUsesVisibleOrder: Api.playbackUsesVisibleOrder(
     contextUri, filterText, sortKey)
   readonly property string playbackContextUri: Api.playbackContextForView(
     contextUri, filterText, sortKey)
   readonly property var sortKeys: ["default", "name", "artist", "album", "duration",
-    "date", "date-asc"]
+    "date"]
   readonly property bool canReorder: allowReorder && !reorderBusy
     && String(filterText || "").trim() === "" && sortKey === "default"
     && visibleItems.length > 1
@@ -81,8 +87,7 @@ Item {
     if (sortKey === "artist") return "Artist"
     if (sortKey === "album") return "Album"
     if (sortKey === "duration") return "Duration"
-    if (sortKey === "date") return "Date: newest"
-    if (sortKey === "date-asc") return "Date: oldest"
+    if (sortKey === "date" || sortKey === "date-asc") return "Date added"
     return "Original"
   }
 
@@ -305,6 +310,8 @@ Item {
         visible: root.showFilter
         width: visible ? Math.max(80, parent.width
           - (sortButton.visible ? sortButton.width + parent.spacing : 0)
+          - (sortDirectionButton.visible
+            ? sortDirectionButton.width + parent.spacing : 0)
           - countLabel.width - parent.spacing) : 0
         foreground: Color.foreground
         placeholderText: "Filter this list"
@@ -314,6 +321,20 @@ Item {
           root.viewStateChanged(root.filterText, root.sortKey, mediaList.contentY)
         }
         Keys.onDownPressed: root.focusList()
+      }
+
+      Button {
+        id: sortDirectionButton
+        visible: root.showSort && root.sortKey !== "default"
+        iconText: root.sortDescending ? "󰒽" : "󰒼"
+        foreground: Color.foreground
+        tooltipText: root.sortDescending ? "Reverse: showing last first"
+          : "Reverse: showing first first"
+        focusable: false
+        onClicked: {
+          root.sortDescending = !root.sortDescending
+          root.viewStateChanged(root.filterText, root.sortKey, mediaList.contentY)
+        }
       }
 
       Button {
@@ -392,6 +413,7 @@ Item {
         required property var modelData
         required property int index
         itemData: modelData
+        service: root.service
         foreground: Color.foreground
         accent: Color.accent
         fontFamily: Style.font.family

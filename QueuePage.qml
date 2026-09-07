@@ -99,6 +99,7 @@ Item {
         required property var modelData
         required property int index
         itemData: modelData
+        service: page.panel.service
         foreground: page.panel.foreground
         accent: page.panel.accent
         fontFamily: page.panel.fontFamily

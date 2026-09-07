@@ -427,7 +427,8 @@ Item {
       ? String(state.searchType) : "track"
     libraryType = ["tracks", "albums", "artists", "shows", "episodes", "audiobooks"]
       .indexOf(String(state.libraryType || "")) >= 0 ? String(state.libraryType) : "tracks"
-    homeType = ["recent", "tracks", "artists"].indexOf(String(state.homeType || "")) >= 0
+    homeType = ["recent", "tracks", "artists", "releases"]
+      .indexOf(String(state.homeType || "")) >= 0
       ? String(state.homeType) : "recent"
     libraryFilter = String(state.libraryFilter || "")
     librarySort = String(state.librarySort || "default")
@@ -451,7 +452,8 @@ Item {
     restoredDetailItemCount = Api.normalizedPlaylistRestoreCount(
       state.detailItemCount)
     var restoredTab = String(state.tab || "home")
-    if (["home", "discover", "search", "library", "playlists", "detail", "queue", "devices", "setup"]
+    if (["home", "discover", "search", "library", "playlists", "detail", "queue",
+      "nowplaying", "stats", "devices", "setup"]
         .indexOf(restoredTab) >= 0) currentTab = restoredTab
     if (restoreDetail !== false && currentTab === "detail" && state.detailItem) {
       var sameDetail = service.detailItem
@@ -1170,6 +1172,8 @@ Item {
     else if (action === "nav-discover") chooseTab("discover")
     else if (action === "nav-radio") openLastRadio()
     else if (action === "nav-queue") chooseTab("queue")
+    else if (action === "nav-nowplaying") chooseTab("nowplaying")
+    else if (action === "nav-stats") chooseTab("stats")
     else if (action === "nav-library") chooseTab("library")
     else if (action === "nav-playlists") chooseTab("playlists")
     else if (action === "nav-create") openCreatePlaylistPopup()
@@ -1552,6 +1556,8 @@ Item {
   function primaryNavigationShortcut(id) {
     if (id === "home") return "Alt+Shift+H"
     if (id === "queue") return "Alt+Shift+Q"
+    if (id === "nowplaying") return "Alt+Shift+N"
+    if (id === "stats") return "Alt+Shift+I"
     return ""
   }
 
@@ -1565,6 +1571,8 @@ Item {
       { action: "Open Settings", keys: "Ctrl+," },
       { action: "Open For You", keys: "Alt+Shift+H" },
       { action: "Open Queue", keys: "Alt+Shift+Q" },
+      { action: "Open Now playing", keys: "Alt+Shift+N" },
+      { action: "Open Your listening", keys: "Alt+Shift+I" },
       { action: "Open Devices", keys: "Alt+Shift+D" },
       { action: "Open the current artist", keys: "Ctrl+Shift+A" },
       { action: "Open the current album", keys: "Ctrl+Shift+B" },
@@ -1810,7 +1818,8 @@ Item {
       universalSearchActive = false
       artistSearchText = ""
       detailFilter = ""
-    } else if (["home", "discover", "search", "library", "playlists", "queue", "devices", "setup"].indexOf(requestedTab) >= 0)
+    } else if (["home", "discover", "search", "library", "playlists", "queue",
+      "nowplaying", "stats", "devices", "setup"].indexOf(requestedTab) >= 0)
       currentTab = requestedTab
     if (accountConnected) {
       openedForLogin = false
@@ -1911,7 +1920,9 @@ Item {
       label: service.lastRadioPlaying ? "Current radio" : "Last radio",
       icon: "󰎆"
     })
+    items.push({ id: "nowplaying", label: "Now playing", icon: "󰝚" })
     items.push({ id: "queue", label: "Queue", icon: "󰐕" })
+    items.push({ id: "stats", label: "Listening", icon: "󰄨" })
     return items
   }
 
@@ -1979,6 +1990,8 @@ Item {
     if (currentTab === "library") return libraryPage
     if (currentTab === "playlists") return playlistsPage
     if (currentTab === "detail") return detailPage
+    if (currentTab === "nowplaying") return nowPlayingPage
+    if (currentTab === "stats") return statsPage
     if (currentTab === "queue") return queuePage
     if (currentTab === "devices") return devicesPage
     return searchPage
@@ -1991,6 +2004,8 @@ Item {
     if (currentTab === "discover") return "Discover"
     if (currentTab === "library") return "Your Library"
     if (currentTab === "playlists") return "Playlists"
+    if (currentTab === "nowplaying") return "Now playing"
+    if (currentTab === "stats") return "Your listening"
     if (currentTab === "queue") return "Queue"
     if (currentTab === "devices") return "Spotify Connect"
     if (currentTab === "setup") return "Settings"
@@ -2001,25 +2016,32 @@ Item {
     return "Search"
   }
 
-  function pageSubtitle() {
-    if (currentTab === "login") return "Connect your Spotify account to get started"
-    if (showingUniversalSearch) return activeSearchScope.available
-      ? "Searching everywhere — enable the area checkmark to narrow the results"
-      : "Songs, artists, albums, playlists, podcasts and audiobooks"
-    if (currentTab === "home") return "Recently played and your personal favorites"
-    if (currentTab === "discover") return "Personal mixes and fresh music from Spotify"
-    if (currentTab === "library") return ""
-    if (currentTab === "playlists") return "Your Spotify playlists"
-    if (currentTab === "queue") return "What plays next"
-    if (currentTab === "devices") return "Speakers and players"
-    if (currentTab === "setup") return "Account, playback and app preferences"
-    if (currentTab === "detail") {
-      if (artistScopedSearchActive)
-        return "Songs, albums and playlists matching “" + artistSearchText.trim() + "”"
-      return service && service.detailItem
-        ? Api.spotifyTypeLabel(service.detailItem.type) : "Spotify item"
-    }
-    return "Songs, artists, albums, playlists, podcasts and audiobooks"
+
+  function libraryFilterLabel() {
+    if (!service) return "All"
+    var mode = service.libraryFilter
+    if (mode === "playlist") return "Playlists"
+    if (mode === "artist") return "Artists"
+    if (mode === "album") return "Albums"
+    if (mode === "show") return "Podcasts"
+    return "All"
+  }
+
+  function libraryFilterIcon() {
+    if (!service) return "󰈲"
+    var mode = service.libraryFilter
+    if (mode === "playlist") return "󰲸"
+    if (mode === "artist") return "󰠃"
+    if (mode === "album") return "󰀥"
+    if (mode === "show") return "󰦔"
+    return "󰈲"
+  }
+
+  function cycleLibraryFilter() {
+    if (!service) return
+    var modes = Api.libraryFilterModes()
+    var at = modes.indexOf(service.libraryFilter)
+    service.setLibraryFilter(modes[(at + 1) % modes.length])
   }
 
   function librarySortLabel() {
@@ -2060,6 +2082,7 @@ Item {
     service.setLibraryView(modes[(at + 1) % modes.length])
   }
 
+  readonly property bool spokenWordPlaying: !!(service && service.currentIsSpokenWord)
   readonly property bool libraryViewIsGrid: service
     && service.libraryView.indexOf("grid") >= 0
   readonly property bool libraryViewIsCompact: service
@@ -2394,6 +2417,22 @@ Item {
         onActivated: {
           root.latchShortcutMode(sequence)
           root.chooseTab("queue")
+        }
+      }
+      Shortcut {
+        sequence: "Alt+Shift+I"
+        enabled: root.accountConnected && !root.shortcutsBlocked
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.chooseTab("stats")
+        }
+      }
+      Shortcut {
+        sequence: "Alt+Shift+N"
+        enabled: root.accountConnected && !root.shortcutsBlocked
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.chooseTab("nowplaying")
         }
       }
       Shortcut {
@@ -2738,13 +2777,36 @@ Item {
             }
 
             Row {
-              id: libraryControls
+              id: libraryFilterRow
               visible: !root.compactWidth
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: libraryNavigation.bottom
               anchors.margins: Style.space(2)
               anchors.topMargin: Style.space(6)
+              height: visible ? implicitHeight : 0
+
+              Button {
+                id: libraryFilterButton
+                width: parent.width
+                iconText: root.libraryFilterIcon()
+                text: root.libraryFilterLabel()
+                foreground: root.muted
+                leftAlign: true
+                focusable: false
+                tooltipText: "Show one kind of thing"
+                onClicked: root.cycleLibraryFilter()
+              }
+            }
+
+            Row {
+              id: libraryControls
+              visible: !root.compactWidth
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: libraryFilterRow.bottom
+              anchors.margins: Style.space(2)
+              anchors.topMargin: Style.space(3)
               height: visible ? implicitHeight : 0
               spacing: Style.space(2)
 
@@ -2797,6 +2859,7 @@ Item {
                 grid: true
                 thumbnailSize: Math.min(width, height) - Style.space(10)
                 fallbackGlyph: root.sidebarItemIcon(modelData)
+                service: root.service
                 foreground: root.foreground
                 accent: root.accent
                 muted: root.muted
@@ -2852,6 +2915,7 @@ Item {
                 grid: false
                 thumbnailSize: root.libraryThumbSize
                 fallbackGlyph: root.sidebarItemIcon(modelData)
+                service: root.service
                 foreground: root.foreground
                 accent: root.accent
                 muted: root.muted
@@ -2956,14 +3020,6 @@ Item {
                   elide: Text.ElideRight
                 }
 
-                Text {
-                  width: parent.width
-                  text: root.pageSubtitle()
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
               }
 
               Button {
@@ -3015,6 +3071,8 @@ Item {
                   else if (root.currentTab === "library")
                     root.service.loadLibrary(root.libraryType, false, true)
                   else root.service.refreshView(root.currentTab)
+                  // Refresh always means the sidebar too, cache or no cache.
+                  root.service.refreshLibraryNow()
                 }
               }
 
@@ -3069,7 +3127,8 @@ Item {
             Row {
               id: unifiedSearchBar
               visible: root.currentTab !== "login" && root.currentTab !== "devices"
-                && root.currentTab !== "setup"
+                && root.currentTab !== "setup" && root.currentTab !== "stats"
+                && root.currentTab !== "nowplaying"
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: statusBanner.visible ? statusBanner.bottom : pageHeader.bottom
@@ -3457,6 +3516,7 @@ Item {
                 }
                 TransportButton {
                   glyphText: "󰒮"
+                  visible: !root.spokenWordPlaying
                   foreground: root.foreground
                   hasCursor: root.cursorOn("footer", "previous")
                   tooltipText: root.shortcutHint("Previous", "Ctrl+Left")
@@ -3466,6 +3526,18 @@ Item {
                     if (on) root.setPanelCursor("footer", "previous")
                   }
                   KeyHint { region: "footer"; action: "previous"; sequences: ["Ctrl+Left"] }
+                }
+                TransportButton {
+                  glyphText: "󰵛"
+                  visible: root.spokenWordPlaying
+                  foreground: root.foreground
+                  hasCursor: root.cursorOn("footer", "back15")
+                  tooltipText: "Back 15 seconds"
+                  enabled: root.service && root.service.playbackControllable
+                  onClicked: if (root.service) root.service.skipBySeconds(-15)
+                  onHovered: function(on) {
+                    if (on) root.setPanelCursor("footer", "back15")
+                  }
                 }
                 TransportButton {
                   glyphText: root.service && root.service.playing ? "󰏤" : "󰐊"
@@ -3483,7 +3555,20 @@ Item {
                   KeyHint { region: "footer"; action: "play"; sequences: ["Space"] }
                 }
                 TransportButton {
+                  glyphText: "󰵙"
+                  visible: root.spokenWordPlaying
+                  foreground: root.foreground
+                  hasCursor: root.cursorOn("footer", "forward30")
+                  tooltipText: "Forward 30 seconds"
+                  enabled: root.service && root.service.playbackControllable
+                  onClicked: if (root.service) root.service.skipBySeconds(30)
+                  onHovered: function(on) {
+                    if (on) root.setPanelCursor("footer", "forward30")
+                  }
+                }
+                TransportButton {
                   glyphText: "󰒭"
+                  visible: !root.spokenWordPlaying
                   foreground: root.foreground
                   hasCursor: root.cursorOn("footer", "next")
                   tooltipText: root.shortcutHint("Next", "Ctrl+Right")
@@ -3768,6 +3853,22 @@ Item {
     id: playlistsPage
 
     PlaylistsPage {
+      panel: root
+    }
+  }
+
+  Component {
+    id: statsPage
+
+    StatsPage {
+      panel: root
+    }
+  }
+
+  Component {
+    id: nowPlayingPage
+
+    NowPlayingPage {
       panel: root
     }
   }

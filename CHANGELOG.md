@@ -40,3 +40,21 @@ Changes below start from the fork point. For the history of the original plugin,
 - Moved the sleep timer and the lyrics-plugin flow out of Service.qml into their
   own files. The sleep timer now has 20 unit tests, where that logic previously
   had none, and the last uncovered playback-decision helper is now tested too.
+- Added a Now playing screen, `Alt+Shift+N`.
+- Added a Your listening screen, `Alt+Shift+I`: a day-by-day heatmap built from
+  the play record the app keeps itself, plus top artists and songs.
+- The artist page now shows followers and genres, your liked songs by that
+  artist, and who else they sit next to.
+- Added a New releases tab to Home.
+- The library sidebar is cached to disk and drawn before Spotify answers, and
+  album artwork is kept on disk instead of refetched.
+- The artist page took 15-23 seconds to show anything. Every request now logs
+  where its time went, which showed the wait was never the network — it was
+  Spotify refusing requests, which paused the whole app for up to 24 seconds.
+  Background work now backs off further with every refusal, stands aside for a
+  moment after anything you open, and the liked-songs crawl resumes where it
+  stopped instead of re-reading all 5,250 songs on every launch. A page you open
+  now loads in 50-225 ms on a quiet account, and stayed under 7 seconds even
+  while Spotify refused nine times in seventy seconds.
+- Fixed a cancelled background request never giving its slot back, which could
+  stall the library crawl for good.

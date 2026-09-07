@@ -5,6 +5,8 @@ import QtTest
 
 import ".." as Plugin
 
+import "../Api.js" as Api
+
 TestCase {
   id: testCase
   name: "SpotifyApiTransport"
@@ -89,21 +91,20 @@ TestCase {
   function test_priorityStartsMutationsThenInteractiveReads() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
-    api.request("GET", "/me", null, null, function() {})
-    api.request("GET", "/me/player", null, null, function() {})
+    var limit = fillEverySlot(api)
     api.request("GET", "/me/albums", null, null, function() {})
     api.request("GET", "/search", null, null, function() {},
       { priority: "interactive" })
     api.request("PUT", "/me/player/play", null, null, function() {})
-    compare(requests.length, 2)
+    compare(requests.length, limit, "nothing else starts while every slot is busy")
 
     complete(requests[0], 200)
-    compare(requests.length, 3)
-    compare(requests[2].method, "PUT")
+    compare(requests.length, limit + 1)
+    compare(requests[limit].method, "PUT", "a mutation jumps the queue")
 
     complete(requests[1], 200)
-    compare(requests.length, 4)
-    verify(requests[3].url.indexOf("/search") >= 0)
+    compare(requests.length, limit + 2)
+    verify(requests[limit + 1].url.indexOf("/search") >= 0)
   }
 
   function test_searchKeepsTheExistingAllTypesRequest() {
@@ -147,18 +148,17 @@ TestCase {
   function test_queuedSearchTimesOutBeforeARequestSlotOpens() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
-    api.request("GET", "/me", null, null, function() {})
-    api.request("GET", "/me/player", null, null, function() {})
-    compare(api.requestsInFlight, 2)
+    var limit = fillEverySlot(api)
+    compare(api.requestsInFlight, limit)
     var error = ""
     api.search("queued", function(groups, reason) { error = reason })
-    compare(requests.length, 2)
+    compare(requests.length, limit)
     compare(api.requestQueue.length, 1)
     clock = 9000
     api.expireTimedOutRequests(clock)
     verify(error.indexOf("too long") >= 0)
     compare(api.requestQueue.length, 0)
-    compare(api.requestsInFlight, 2)
+    compare(api.requestsInFlight, limit)
   }
 
   function test_search429ReturnsWithoutSilentRetry() {
@@ -226,11 +226,19 @@ TestCase {
     compare(api.requestsInFlight, 0)
   }
 
+  // Occupy every request slot, whatever the current limit is.
+  function fillEverySlot(api) {
+    var limit = Api.apiInFlightLimit(false)
+    for (var i = 0; i < limit; i++)
+      api.request("GET", "/fill/" + i, null, null, function() {})
+    compare(requests.length, limit)
+    return limit
+  }
+
   function test_cancelledQueuedRequestNeverStarts() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
-    api.request("GET", "/me", null, null, function() {})
-    api.request("GET", "/me/player", null, null, function() {})
+    var limit = fillEverySlot(api)
     var callbacks = 0
     var handle = api.request("GET", "/search", null, null,
       function() { callbacks++ }, {
@@ -241,9 +249,30 @@ TestCase {
     api.abortRequest(handle)
     compare(api.requestQueue.length, 0)
     complete(requests[0], 200)
-    compare(requests.length, 2)
+    compare(requests.length, limit)
     compare(callbacks, 0)
     compare(api.timedJobs.length, 0)
+  }
+
+  // A cancelled background request has to hand its slot back, or the library
+  // crawl runs out of room and never finishes.
+  function test_abortedBackgroundRequestHandsItsSlotBack() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    var first = api.request("GET", "/me/tracks", null, null, function() {},
+      { priority: "background" })
+    clock += 1000
+    api.request("GET", "/me/albums", null, null, function() {},
+      { priority: "background" })
+    compare(requests.length, 2, "both background slots are busy")
+    compare(api.backgroundInFlight, 2)
+
+    api.abortRequest(first)
+    compare(api.backgroundInFlight, 1, "the cancelled one gave its slot back")
+    clock += 1000
+    api.request("GET", "/me/shows", null, null, function() {},
+      { priority: "background" })
+    compare(requests.length, 3, "so the next page can start")
   }
 
   function test_timeoutUsesInclusiveDeadlineBoundary() {

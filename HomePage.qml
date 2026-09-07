@@ -27,7 +27,8 @@ Item {
         model: [
           { type: "recent", label: "Recently played", icon: "󰋚" },
           { type: "tracks", label: "Top songs", icon: "󰎈" },
-          { type: "artists", label: "Top artists", icon: "󰠃" }
+          { type: "artists", label: "Top artists", icon: "󰠃" },
+          { type: "releases", label: "New releases", icon: "󰀥" }
         ]
         Button {
           required property var modelData
