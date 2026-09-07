@@ -10,9 +10,12 @@ Changes below start from the fork point. For the history of the original plugin,
   directory, and a duplicate copy of a screenshot shipped as `preview.png`.
 - Shrank the documentation screenshots from 3200px to 1600px wide.
 - Lint every source file by glob so a new one is never missed.
-- Run the test suite in CI on every push and pull request. CI installs the two
+- Run the test suite in CI on every push and pull request. CI installs the
   QtQuick modules that `--no-install-recommends` was leaving out, without which
   no QML test could compile at all.
+- Follower counts are grouped from their digits rather than from whatever the
+  engine hands back, which on some builds is already grouped: 1,200 followers
+  came out as "1,,200".
 - Removed the legacy spotifyd playback engine. The Rust backend is now the only
   engine, so there is no unit probe, no distro package fallback, and no second
   set of volume and position handling.

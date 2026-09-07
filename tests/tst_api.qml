@@ -580,6 +580,17 @@ TestCase {
     compare(Api.artistDetailLine(null), "")
   }
 
+  // Some builds hand back a number already grouped for the locale, and
+  // grouping that again gives "1,,200".
+  function test_thousands_groupsDigitsWhateverTheEngineHandsBack() {
+    compare(Api.groupedDigits("1200"), "1,200")
+    compare(Api.groupedDigits("1,200"), "1,200")
+    compare(Api.groupedDigits("1 200"), "1,200")
+    compare(Api.groupedDigits("999"), "999")
+    compare(Api.groupedDigits("1234567"), "1,234,567")
+    compare(Api.groupedDigits(""), "0")
+  }
+
   function test_followerCount_readsAtAGlance() {
     compare(Api.compactCount(999), "999")
     compare(Api.compactCount(1200), "1,200")

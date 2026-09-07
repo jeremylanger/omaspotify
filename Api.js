@@ -2957,7 +2957,21 @@ function compactCount(value) {
   if (n >= 1000000000) return (n / 1000000000).toFixed(1) + "B"
   if (n >= 1000000) return (n / 1000000).toFixed(1) + "M"
   if (n >= 10000) return (n / 1000).toFixed(1) + "K"
-  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  return groupedDigits(String(n))
+}
+
+// Turning a number into text is the engine's business, and some builds have
+// already grouped it for the locale by the time we see it. So take the digits
+// and nothing else, then group those.
+function groupedDigits(text) {
+  var digits = String(text || "").replace(/[^0-9]/g, "")
+  if (!digits) return "0"
+  var out = ""
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 === 0) out += ","
+    out += digits.charAt(i)
+  }
+  return out
 }
 
 // Spotify has no artist bio. Followers and genres are what it does tell us.
