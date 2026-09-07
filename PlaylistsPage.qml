@@ -39,8 +39,7 @@ Item {
         value: page.panel.service && page.panel.service.selectedPlaylist
           ? String(page.panel.service.selectedPlaylist.id) : ""
         onChanged: function(value) {
-          var playlist = page.panel.service ? page.panel.service.playlistById(value) : null
-          if (playlist) page.panel.service.openPlaylist(playlist)
+          page.panel.openSidebarItem(page.panel.sidebarItemById(value))
         }
       }
 

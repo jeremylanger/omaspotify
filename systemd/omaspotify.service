@@ -8,7 +8,7 @@ Wants=sound.target
 Type=simple
 Environment=PULSE_LATENCY_MSEC=30
 Environment=TOKIO_WORKER_THREADS=2
-ExecStart=%h/.local/lib/omaspotify/omaspotify-backend --config-path=%h/.config/omaspotify/playback.conf
+ExecStart=@BACKEND_BINARY@ --config-path=@CONFIG_FILE@
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=5

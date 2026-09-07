@@ -20,6 +20,8 @@ Popup {
   focus: true
   closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
+  onClosed: Qt.callLater(function() { popup.panel.restoreFocus() })
+
   background: BorderSurface {
     color: popup.panel.popupBackground
     radius: Style.cornerRadius

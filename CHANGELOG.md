@@ -58,3 +58,34 @@ Changes below start from the fork point. For the history of the original plugin,
   while Spotify refused nine times in seventy seconds.
 - Fixed a cancelled background request never giving its slot back, which could
   stall the library crawl for good.
+- A page you have already opened now draws from the answer we kept and is
+  checked in the background, instead of being emptied and fetched again. The
+  pages are kept on disk too, so this works from a cold start. An artist page
+  costs six requests, so reopening one is now free until what we hold goes
+  stale, and a failed check leaves what is on screen alone.
+- Fixed plays being counted before the stored record had been read back, which
+  counted the same plays twice.
+- The play record keeps everything, and now says so: a limit was being passed
+  to a merge that never took one.
+- Signing out now clears the listening record, the library cache and the kept
+  pages, from memory and from disk. They used to survive into the next account.
+- Comparing the listening record no longer stringifies it twice per page of the
+  liked-song crawl.
+- Fixed keyboard navigation in the library sidebar doing nothing in grid view,
+  and opening an album, artist or podcast there as though it were a playlist.
+- Fixed the compact library dropdown listing rows that could not be opened.
+- Fixed the keyboard cursor pointing at the hidden skip buttons while a podcast
+  plays instead of the back and forward ones on screen.
+- Fixed a listening range that failed to load being kept as an empty answer,
+  which stopped it ever being asked for again.
+- The playback unit now names the runtime and config directories setup actually
+  used, rather than only ever the default ones.
+- Artwork is only fetched over https, and the artwork scan no longer builds a
+  shell command out of an environment variable.
+- The artist endpoints no longer send `market=from_token`, which is not a
+  country code Spotify accepts. It uses the signed-in account's country.
+- Fixed the playback device name overflowing its row instead of eliding.
+- Fixed the keyboard shortcut hint failing to read its fallback colours, and
+  the playlist picker leaving the keyboard nowhere when it closed.
+- A normalisation setting sent without its pregain is refused rather than
+  quietly dropped.

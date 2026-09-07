@@ -38,7 +38,8 @@ backend_install_is_current() {
   [[ ${actual_binary_hash%% *} == "$expected_binary_hash" ]] || return 1
   [[ ! -f $source_backend_unit ]] \
     || { [[ -f $installed_backend_unit ]] \
-      && cmp -s -- "$source_backend_unit" "$installed_backend_unit"; }
+      && "$source_root/scripts/render-unit.sh" \
+        | cmp -s -- - "$installed_backend_unit"; }
 }
 
 preferred_unit() {

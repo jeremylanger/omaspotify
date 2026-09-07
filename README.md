@@ -161,7 +161,7 @@ personal configuration. Check both the live config and, when applicable, its
 chezmoi source:
 
 ```bash
-rg -n 'quickshell\.spotify|OmaSpotify' \
+rg -in 'quickshell\.spotify|omaspotify' \
   "$HOME/.config/hypr" "$HOME/.local/share/chezmoi" 2>/dev/null
 ```
 

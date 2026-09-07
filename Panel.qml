@@ -123,7 +123,11 @@ Item {
   readonly property var windowContentItem: window.contentItem
   readonly property real windowWidth: window.width
   readonly property real windowHeight: window.height
-  readonly property int playlistShortcutIndex: playlistShortcuts.currentIndex
+  // The library is a list or a grid, never both. Everything the keyboard does
+  // has to follow whichever one is on screen.
+  readonly property var sidebarListView: libraryViewIsGrid ? playlistGrid
+    : playlistShortcuts
+  readonly property int playlistShortcutIndex: sidebarListView.currentIndex
   readonly property bool searchFieldFocused: unifiedSearchField.activeFocus
   readonly property bool hintCtrlHeld: (heldModifierFlags & Qt.ControlModifier) !== 0
   readonly property bool hintShiftHeld: (heldModifierFlags & Qt.ShiftModifier) !== 0
@@ -779,8 +783,8 @@ Item {
     var listCount = 0
     if (region === "sidebar") {
       listAction = "sidebar-playlists"
-      listIndex = playlistShortcuts.currentIndex
-      listCount = playlistShortcuts.count
+      listIndex = sidebarListView.currentIndex
+      listCount = sidebarListView.count
     } else if (region === "page") {
       listAction = Api.isCursorListAction(panelCursorAction)
         ? panelCursorAction : ""
@@ -844,9 +848,9 @@ Item {
     var back = tabDestination(true)
     return Api.cursorListRowHint({
       rowIndex: index,
-      currentIndex: playlistShortcuts.currentIndex,
-      count: playlistShortcuts.count,
-      tabRowIndex: firstVisibleIndexOf(playlistShortcuts),
+      currentIndex: sidebarListView.currentIndex,
+      count: sidebarListView.count,
+      tabRowIndex: firstVisibleIndexOf(sidebarListView),
       atList: panelCursorRegion === "sidebar"
         && panelCursorAction === "sidebar-playlists",
       previousIsCurrent: panelCursorRegion === "sidebar"
@@ -944,7 +948,8 @@ Item {
     if (service && service.currentArtistContextAvailable) actions.push("artist")
     if (service && service.currentAlbumContextAvailable) actions.push("album")
     if (service && service.playbackControllable)
-      actions.push("shuffle", "previous", "play", "next", "repeat")
+      actions.push("shuffle", spokenWordPlaying ? "back15" : "previous", "play",
+        spokenWordPlaying ? "forward30" : "next", "repeat")
     if (service && service.lyricsAvailable) actions.push("lyrics")
     if (service && service.lengthSeconds > 0 && service.playbackControllable)
       actions.push("seek")
@@ -1049,10 +1054,10 @@ Item {
   }
 
   function moveSidebarPlaylists(delta) {
-    var count = playlistShortcuts.count
-    var next = Api.listIndexAfterMove(count, playlistShortcuts.currentIndex, delta)
+    var list = sidebarListView
+    var next = Api.listIndexAfterMove(list.count, list.currentIndex, delta)
     if (next < 0) return false
-    playlistShortcuts.currentIndex = next
+    list.currentIndex = next
     return true
   }
 
@@ -1068,9 +1073,9 @@ Item {
   }
 
   function enterListAction(action, delta) {
-    if (action === "sidebar-playlists" && playlistShortcuts.count > 0) {
-      playlistShortcuts.currentIndex = delta < 0
-        ? playlistShortcuts.count - 1 : 0
+    if (action === "sidebar-playlists" && sidebarListView.count > 0) {
+      sidebarListView.currentIndex = delta < 0
+        ? sidebarListView.count - 1 : 0
       return
     }
     if (!Api.isCursorListAction(action)) return
@@ -1109,8 +1114,8 @@ Item {
   function syncCursorFocus() {
     if (!panelCursorActive || typingInField) return
     if (panelCursorAction === "sidebar-playlists") {
-      if (playlistShortcuts.currentIndex < 0 && playlistShortcuts.count > 0)
-        playlistShortcuts.currentIndex = 0
+      if (sidebarListView.currentIndex < 0 && sidebarListView.count > 0)
+        sidebarListView.currentIndex = 0
       blurPageLists()
       focusScope.forceActiveFocus()
       return
@@ -1178,12 +1183,8 @@ Item {
     else if (action === "nav-playlists") chooseTab("playlists")
     else if (action === "nav-create") openCreatePlaylistPopup()
     else if (action === "sidebar-playlists") {
-      var playlists = service ? service.sidebarPlaylists() : []
-      var playlist = playlists[playlistShortcuts.currentIndex]
-      if (playlist) {
-        chooseTab("playlists")
-        service.openPlaylist(playlist)
-      }
+      var rows = service ? service.sidebarPlaylists() : []
+      openSidebarItem(rows[sidebarListView.currentIndex])
     } else if (action === "nav-settings") chooseTab("setup")
     else if (action === "back") goBack()
     else if (action === "search") focusSearch()
@@ -1198,6 +1199,8 @@ Item {
     else if (action === "shuffle" && service)
       service.setShuffle(!service.shuffle)
     else if (action === "previous" && service) service.previous()
+    else if (action === "back15" && service) service.skipBySeconds(-15)
+    else if (action === "forward30" && service) service.skipBySeconds(30)
     else if (action === "play" && service) service.togglePlayback()
     else if (action === "next" && service) service.next()
     else if (action === "repeat" && service) service.cycleRepeat()
@@ -2099,6 +2102,14 @@ Item {
     if (type === "album") return "󰀥"
     if (type === "show" || type === "episode") return "󰦔"
     return "󰲸"
+  }
+
+  function sidebarItemById(id) {
+    var key = String(id || "")
+    var rows = service ? service.sidebarPlaylists() : []
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i] && String(rows[i].id || "") === key) return rows[i]
+    return null
   }
 
   function openSidebarItem(item) {
@@ -3760,8 +3771,13 @@ Item {
                 spacing: Style.space(4)
                 visible: root.service && root.service.playbackDeviceName !== ""
 
+                // Bounded so a long device name elides instead of running
+                // out past the row.
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
+                  width: Math.max(0, parent.width - deviceGlyph.width
+                    - parent.spacing)
+                  horizontalAlignment: Text.AlignRight
                   text: root.service ? root.service.playbackDeviceName : ""
                   color: root.muted
                   font.family: root.fontFamily
@@ -3770,6 +3786,7 @@ Item {
                 }
 
                 Text {
+                  id: deviceGlyph
                   anchors.verticalCenter: parent.verticalCenter
                   text: "󰦧"
                   color: root.muted

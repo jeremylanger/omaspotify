@@ -38,6 +38,7 @@ Item {
   readonly property string sessionPath: stateDir + "/session.json"
   readonly property string playHistoryPath: stateDir + "/plays.json"
   readonly property string libraryCachePath: stateDir + "/library.json"
+  readonly property string queryCachePath: stateDir + "/queries.json"
   readonly property string artworkDir: cacheHome + "/omaspotify/art"
 
   readonly property var defaultSettingValues: ({
@@ -151,6 +152,8 @@ Item {
   property double savedTracksThrough: 0
   property bool playHistoryReady: false
   property bool playHistoryDirty: false
+  // A fetch asked for before the record was read back off disk.
+  property bool playsPending: false
   property double lastPlayHistoryFetch: 0
   // Artwork already on disk, by source url. Rows read through artworkFor().
   property var artworkCached: ({})
@@ -419,6 +422,18 @@ Item {
   property string discoverMessage: ""
   readonly property bool discoverLoading: discoverRequestsPending > 0
 
+  // Which cached page each screen is currently showing, so a fresh answer
+  // replaces the right one.
+  property string detailCacheKey: ""
+  property string playlistCacheKey: ""
+  // A page drawn from the cache is refreshed underneath rather than blanked.
+  property bool detailRevalidating: false
+  // What is on screen came out of the cache and nothing fresh has replaced it,
+  // so putting it away again would only renew a date it has not earned.
+  property bool detailFromCache: false
+  property bool playlistFromCache: false
+  property bool queryCacheReady: false
+
   property var detailItem: null
   property var detailItems: []
   property string detailNext: ""
@@ -444,6 +459,35 @@ Item {
   property int artistCatalogSerial: 0
   readonly property bool artistCatalogLoading: artistAlbumsLoading
     || artistSongsLoading || artistPlaylistsLoading
+
+  // Everything a detail page draws, in one value, so the whole page can be put
+  // away and brought back. Written as a binding so every part of it is
+  // followed without a signal handler each.
+  readonly property var detailSnapshot: ({
+    item: detailItem,
+    items: detailItems,
+    next: detailNext,
+    message: detailMessage,
+    songs: artistSongs,
+    songsNext: artistSongsNext,
+    albums: artistAlbums,
+    albumsNext: artistAlbumsNext,
+    playlists: artistPlaylists,
+    playlistsNext: artistPlaylistsNext,
+    thisIs: artistThisIsPlaylist,
+    related: artistRelated,
+    likedSongs: artistLikedSongs
+  })
+  readonly property var playlistSnapshot: ({
+    item: selectedPlaylist,
+    items: playlistItems,
+    next: playlistItemsNext
+  })
+  readonly property bool detailSettled: !detailLoading && !artistCatalogLoading
+    && !artistLikedSongsLoading && !artistThisIsLoading && !detailFromCache
+
+  onDetailSnapshotChanged: detailCacheSaveTimer.restart()
+  onPlaylistSnapshotChanged: playlistCacheSaveTimer.restart()
 
   property bool playlistActionBusy: false
   property bool playlistConversionBusy: false
@@ -654,8 +698,8 @@ Item {
 
   function notePlays(fresh) {
     recentContextPlays = fresh || ({})
-    var next = Api.mergePlayHistory(playHistory, recentContextPlays, 600)
-    if (JSON.stringify(next) === JSON.stringify(playHistory)) return
+    var next = Api.mergePlayHistory(playHistory, recentContextPlays)
+    if (Api.sameTimeMap(next, playHistory)) return
     playHistory = next
     playHistoryDirty = true
     if (playHistoryReady) playHistorySaveTimer.restart()
@@ -664,7 +708,7 @@ Item {
   // Dates we worked out ourselves: a liked song, a saved album, a playlist edit.
   function noteTouched(fresh) {
     var next = Api.mergeTouchDates(touchedDates, fresh)
-    if (JSON.stringify(next) === JSON.stringify(touchedDates)) return
+    if (Api.sameTouchDates(next, touchedDates)) return
     touchedDates = next
     playHistoryDirty = true
     if (playHistoryReady) playHistorySaveTimer.restart()
@@ -712,7 +756,8 @@ Item {
 
     artworkQueue = missing.slice(0, 200)
     var args = ["--silent", "--fail", "--parallel", "--parallel-max", "6",
-      "--max-time", "20", "--create-dirs"]
+      "--max-time", "20", "--create-dirs", "--proto", "=https",
+      "--proto-redir", "=https"]
     for (var j = 0; j < artworkQueue.length; j++) {
       args.push("-o")
       args.push(artworkDir + "/" + Api.artworkCacheName(artworkQueue[j]))
@@ -752,6 +797,68 @@ Item {
       savedShows = cached.savedShows
   }
 
+  // Pages already answered are kept on disk, so opening one after a restart
+  // draws before Spotify is asked anything at all.
+  function applyQueryCacheFile(raw) {
+    if (queryCacheReady) return
+    queryCacheReady = true
+    pageCache.restore(raw)
+  }
+
+  function flushQueryCache() {
+    queryCacheSaveTimer.stop()
+    if (!queryCacheReady) return
+    queryCacheFile.setText(pageCache.serialize())
+  }
+
+  function detailCacheKeyFor(item, artistQuery) {
+    if (!item || !item.id) return ""
+    return Api.queryCacheKey(["detail", String(item.type || ""),
+      String(item.id), String(artistQuery || "")])
+  }
+
+  function playlistCacheKeyFor(playlist) {
+    if (!playlist || !playlist.id) return ""
+    return Api.queryCacheKey(["playlist", String(playlist.id)])
+  }
+
+  function applyDetailSnapshot(snapshot, item) {
+    detailItem = snapshot.item || item
+    detailItems = Array.isArray(snapshot.items) ? snapshot.items : []
+    detailNext = String(snapshot.next || "")
+    detailMessage = String(snapshot.message || "")
+    artistSongs = Array.isArray(snapshot.songs) ? snapshot.songs : []
+    artistSongsNext = String(snapshot.songsNext || "")
+    artistAlbums = Array.isArray(snapshot.albums) ? snapshot.albums : []
+    artistAlbumsNext = String(snapshot.albumsNext || "")
+    artistPlaylists = Array.isArray(snapshot.playlists) ? snapshot.playlists : []
+    artistPlaylistsNext = String(snapshot.playlistsNext || "")
+    artistThisIsPlaylist = snapshot.thisIs || null
+    artistRelated = Array.isArray(snapshot.related) ? snapshot.related : []
+    artistLikedSongs = Array.isArray(snapshot.likedSongs) ? snapshot.likedSongs : []
+  }
+
+  function keepDetailPage() {
+    detailCacheSaveTimer.stop()
+    if (!detailCacheKey || !detailSettled) return
+    pageCache.write(detailCacheKey, detailSnapshot)
+  }
+
+  function keepPlaylistPage() {
+    playlistCacheSaveTimer.stop()
+    if (!playlistCacheKey || playlistItemsLoading || playlistItemsError) return
+    if (playlistFromCache) return
+    pageCache.write(playlistCacheKey, playlistSnapshot)
+  }
+
+  // Anything that edits a playlist makes what we kept of it wrong.
+  function forgetCachedPlaylist(playlist) {
+    var id = playlist && playlist.id ? String(playlist.id) : ""
+    if (!id) return
+    pageCache.drop(Api.queryCacheKey(["playlist", id]))
+    pageCache.drop(Api.queryCacheKey(["detail", "playlist", id, ""]))
+  }
+
   function saveLibraryCache() {
     if (!libraryCacheReady) return
     libraryCacheSaveTimer.restart()
@@ -766,7 +873,7 @@ Item {
 
   function noteLikedTracks(fresh) {
     var next = Api.mergeLikedIndex(likedByArtist, fresh, 200)
-    if (JSON.stringify(next) === JSON.stringify(likedByArtist)) return
+    if (Api.sameLikedIndex(next, likedByArtist)) return
     likedByArtist = next
     playHistoryDirty = true
     if (playHistoryReady) playHistorySaveTimer.restart()
@@ -788,9 +895,13 @@ Item {
     savedTracksNewest = stored.savedTracksNewest
     likedByArtist = Api.mergeLikedIndex(stored.likedByArtist, likedByArtist, 200)
     playDays = Api.mergeDayCounts(stored.playDays, playDays)
-    playsCountedThrough = stored.playsCountedThrough
+    playsCountedThrough = Math.max(stored.playsCountedThrough, playsCountedThrough)
     playHistoryReady = true
     if (playHistoryDirty) playHistorySaveTimer.restart()
+    if (playsPending) {
+      playsPending = false
+      refreshPlayHistory(true)
+    }
     crawlStartTimer.restart()
     refreshPlaylistEdits()
   }
@@ -1375,9 +1486,11 @@ Item {
   // network request; the explicit refresh control can still force one.
   // A page shows nothing at all until these land, so they go ahead of the
   // queue and get an early try while Spotify is refusing.
-  function pageRequest(method, path, query, callback) {
+  // A page showing nothing goes ahead of the queue. A page already drawn from
+  // the cache is only being checked, so it takes its turn like anything else.
+  function pageRequest(method, path, query, callback, revalidating) {
     return spotifyApi.request(method, path, query, null, callback,
-      { priority: "interactive" })
+      { priority: revalidating === true ? "" : "interactive" })
   }
 
   function openView(view, force) {
@@ -1538,10 +1651,13 @@ Item {
     return result
   }
 
+  // Every playlist edit comes back with a new snapshot id, so this is the one
+  // place that knows the page we kept is now wrong.
   function updatePlaylistSnapshot(id, snapshotId) {
     var key = String(id || "")
     var snapshot = String(snapshotId || "")
     if (!key || !snapshot) return
+    forgetCachedPlaylist({ id: key })
     function updated(item) {
       if (!item || String(item.id || "") !== key) return item
       var copy = Api.shallowCopy(item)
@@ -1608,6 +1724,13 @@ Item {
   // The top lists move slowly, so they are fetched once. Plays are not: each
   // batch adds to the stored record, so checking often is how it gets deeper.
   function refreshPlayHistory(force) {
+    // Counting days before the stored record is back would count every play
+    // from a watermark of zero, and then count them all a second time against
+    // what the file already holds.
+    if (!playHistoryReady) {
+      playsPending = true
+      return
+    }
     var now = Date.now()
     if (!force && now - lastPlayHistoryFetch < 120000) return
     lastPlayHistoryFetch = now
@@ -1644,6 +1767,7 @@ Item {
     var pending = 2
     var tracks = []
     var artists = []
+    var failed = false
     var settle = function() {
       pending--
       if (pending > 0) return
@@ -1651,20 +1775,25 @@ Item {
       if (expected !== root.dataSerial) return
       root.statsTracks = tracks
       root.statsArtists = artists
+      // A half-answered range is not worth keeping: holding it would stop it
+      // ever being asked for again.
+      if (failed) return
       var next = Api.shallowCopy(root.statsCache)
       next[range] = { tracks: tracks, artists: artists }
       root.statsCache = next
     }
     spotifyApi.request("GET", "/me/top/tracks", { limit: 20, time_range: range },
       null, function(status, payload, error) {
-        if (!error) tracks = Api.normalizePage(payload, function(value) {
+        if (error) failed = true
+        else tracks = Api.normalizePage(payload, function(value) {
           return Api.normalizeTrack(value, 96)
         }).items
         settle()
       })
     spotifyApi.request("GET", "/me/top/artists", { limit: 20, time_range: range },
       null, function(status, payload, error) {
-        if (!error) artists = Api.normalizePage(payload, function(value) {
+        if (error) failed = true
+        else artists = Api.normalizePage(payload, function(value) {
           return Api.normalizeContext(value, 96)
         }).items
         settle()
@@ -2142,10 +2271,23 @@ Item {
     playlistRestoreTargetCount = Api.normalizedPlaylistRestoreCount(
       restoredItemCount)
     selectedPlaylist = playlist
-    playlistItems = []
-    playlistItemsNext = ""
     playlistItemsError = ""
     playlistItemsStatus = 0
+    playlistCacheKey = playlistCacheKeyFor(playlist)
+    var kept = pageCache.read(playlistCacheKey)
+    playlistItems = kept && Array.isArray(kept.items) ? kept.items : []
+    playlistItemsNext = kept ? String(kept.next || "") : ""
+    playlistFromCache = !!kept
+    // A check starts again from the first page, so it has to page back to the
+    // depth already on screen instead of leaving a shorter list behind.
+    playlistRestoreTargetCount = Math.max(playlistRestoreTargetCount,
+      playlistItems.length)
+    if (pageCache.freshness(playlistCacheKey) === "fresh") {
+      if (Api.playlistRestoreShouldContinue(playlistItems.length,
+          playlistRestoreTargetCount, playlistItemsNext)) loadPlaylistItems(true)
+      else playlistRestoreTargetCount = 0
+      return
+    }
     loadPlaylistItems(false)
   }
 
@@ -2157,8 +2299,10 @@ Item {
     var playlistId = String(selectedPlaylist.id)
     var expected = dataSerial
     var requestSerial = playlistItemsSerial
+    // Rows already on screen came from the cache, so this is only a check.
+    var drawn = !append && playlistItems.length > 0
     playlistItemsLoading = true
-    spotifyApi.request("GET", path, append ? null : { limit: 50 }, null,
+    pageRequest("GET", path, append ? null : { limit: 50 },
       function(status, payload, error) {
         if (expected !== root.dataSerial) return
         if (requestSerial !== root.playlistItemsSerial) return
@@ -2170,6 +2314,9 @@ Item {
             root.playlistOwned(root.selectedPlaylist),
             root.selectedPlaylist.collaborative === true,
             root.currentUserId !== "")
+          // What was drawn from the cache stays: a failed check is no reason
+          // to empty a list that is already on screen.
+          if (drawn) return
           if (!append) {
             root.playlistItemsStatus = status
             root.playlistItemsError = hidden ? "" : error
@@ -2177,6 +2324,7 @@ Item {
           if (!hidden || append) root.fail(error)
           return
         }
+        root.playlistFromCache = false
         var fallbackPosition = append && root.playlistItems.length
           ? Api.playlistPositionAt(root.playlistItems,
             root.playlistItems.length - 1) + 1 : 0
@@ -2202,7 +2350,7 @@ Item {
             root.playlistRestoreTargetCount, root.playlistItemsNext))
           root.loadPlaylistItems(true)
         else root.playlistRestoreTargetCount = 0
-      })
+      }, drawn || append === true)
   }
 
   function loadMorePlaylistItems() {
@@ -2381,12 +2529,14 @@ Item {
 
   function reloadPlaylist(playlist) {
     if (!playlist) return
+    forgetCachedPlaylist(playlist)
     var restoredDetailItemCount = detailRememberedItemCount
     if (selectedPlaylist && selectedPlaylist.id === playlist.id) {
       var restoredItemCount = playlistRememberedItemCount
       playlistItemsSerial++
       playlistItemsLoading = false
       playlistRestoreTargetCount = restoredItemCount
+      playlistFromCache = false
       playlistItems = []
       playlistItemsNext = ""
       playlistItemsError = ""
@@ -2528,9 +2678,28 @@ Item {
     artistLikedSongs = []
     artistLikedSongsLoading = false
     artistRelated = []
-    detailLoading = true
     activeView = "detail"
     checkSavedItems([item])
+
+    // Draw the answer we already have, then decide whether to ask for another.
+    // An artist page is six requests, so one opened twice is worth keeping.
+    detailCacheKey = detailCacheKeyFor(item, initialArtistQuery)
+    var kept = pageCache.read(detailCacheKey)
+    var held = pageCache.freshness(detailCacheKey)
+    if (kept) applyDetailSnapshot(kept, item)
+    detailFromCache = !!kept
+    detailRevalidating = !!kept
+    detailLoading = !kept
+    if (type === "playlist")
+      detailRestoreTargetCount = Math.min(cacheLimit,
+        Math.max(detailRestoreTargetCount, detailItems.length))
+    if (held === "fresh") {
+      detailRevalidating = false
+      if (Api.playlistRestoreShouldContinue(detailItems.length,
+          detailRestoreTargetCount, detailNext)) loadMoreDetail()
+      else detailRestoreTargetCount = 0
+      return
+    }
 
     var metadataPath = "/" + (type === "show" ? "shows" : type === "audiobook"
       ? "audiobooks" : type + "s") + "/" + encodeURIComponent(String(item.id))
@@ -2539,9 +2708,13 @@ Item {
       if (error) {
         root.detailRestoreTargetCount = 0
         root.detailLoading = false
-        root.fail(error)
+        root.detailRevalidating = false
+        // A page already drawn from the cache stays on screen: a failed check
+        // is no reason to empty it.
+        if (!kept) root.fail(error)
         return
       }
+      root.detailFromCache = false
       var normalized = Api.normalizeContext(payload, 256)
       if (normalized) root.detailItem = normalized
       var parent = root.detailItem || item
@@ -2556,6 +2729,7 @@ Item {
       root.detailItems = page.items.slice(0, root.cacheLimit)
       root.detailNext = page.next
       root.detailLoading = false
+      root.detailRevalidating = false
       root.checkSavedItems(root.detailItems)
       if (type === "playlist" && Api.playlistRestoreShouldContinue(
           root.detailItems.length, root.detailRestoreTargetCount,
@@ -2563,7 +2737,7 @@ Item {
       else root.detailRestoreTargetCount = 0
       if (type === "playlist" && !payload.items && !payload.tracks)
         root.detailMessage = Api.playlistItemsHiddenMessage()
-    })
+    }, !!kept)
   }
 
   // The index holds ids only, so the tracks themselves are fetched here, 50 at
@@ -2573,7 +2747,6 @@ Item {
     var ids = likedByArtist[String(artist.uri)]
     if (!Array.isArray(ids) || ids.length === 0) return
     var batches = Api.idBatches(ids, 50)
-    artistLikedSongs = []
     artistLikedSongsLoading = true
     var pending = batches.length
     var collected = []
@@ -2615,7 +2788,6 @@ Item {
 
   function loadArtistThisIs(expectedDetail, artist) {
     if (!artist || artist.type !== "artist" || !artist.name) return
-    artistThisIsPlaylist = null
     artistThisIsLoading = true
     spotifyApi.request("GET", "/search", {
       q: "This Is " + String(artist.name),
@@ -2637,17 +2809,25 @@ Item {
     var expectedDetail = serial === undefined ? detailSerial : serial
     var expectedCatalog = ++artistCatalogSerial
     artistCatalogQuery = String(query || "").trim()
-    artistAlbums = []
-    artistAlbumsNext = ""
+    // Searching within an artist is a different page, so it is kept apart from
+    // the artist's own one.
+    detailCacheKey = detailCacheKeyFor(parent, artistCatalogQuery)
+    // A page brought back from the cache is left on screen while the fresh one
+    // loads. Emptying it first is what made reopening an artist feel slow.
+    if (!detailRevalidating) {
+      artistAlbums = []
+      artistAlbumsNext = ""
+      artistSongs = []
+      artistSongsNext = ""
+      artistPlaylists = []
+      artistPlaylistsNext = ""
+    }
     artistAlbumsLoading = false
-    artistSongs = []
-    artistSongsNext = ""
     artistSongsLoading = false
-    artistPlaylists = []
-    artistPlaylistsNext = ""
     artistPlaylistsLoading = false
     detailMessage = ""
-    detailLoading = true
+    detailLoading = !detailRevalidating
+    detailRevalidating = false
     if (artistCatalogQuery) {
       requestArtistCatalog("album", false, expectedDetail, expectedCatalog, parent)
       requestArtistCatalog("track", false, expectedDetail, expectedCatalog, parent)
@@ -4065,6 +4245,11 @@ Item {
     topTracks = []
     topTracksPayload = null
     topArtistsPayload = null
+    statsTracks = []
+    statsArtists = []
+    statsCache = ({})
+    statsLoading = false
+    statsRange = "short_term"
     recentListeningLoaded = false
     recentListeningLoading = false
     topArtists = []
@@ -4115,6 +4300,40 @@ Item {
     localSocketWaitAttempts = 0
     localSocketWaitTimer.stop()
     cancelSleepTimer(false)
+    forgetPersonalRecord()
+  }
+
+  // What you listened to is yours, not the app's. Signing out has to take it
+  // off disk as well as out of memory, or the next account inherits it.
+  function forgetPersonalRecord() {
+    detailCacheKey = ""
+    playlistCacheKey = ""
+    detailRevalidating = false
+    detailFromCache = false
+    playlistFromCache = false
+    pageCache.clear()
+    playHistory = ({})
+    touchedDates = ({})
+    playlistEdits = ({})
+    playlistEditTried = ({})
+    playlistEditQueue = []
+    likedByArtist = ({})
+    playDays = ({})
+    playsCountedThrough = 0
+    playsPending = false
+    savedTracksThrough = 0
+    savedTracksNewest = 0
+    savedTracksOffset = 0
+    savedTracksMark = 0
+    lastPlayHistoryFetch = 0
+    recentContextPlays = ({})
+    listenWindowNow = 0
+    libraryCacheFetchedAt = 0
+    sidebarItems = []
+    playHistoryDirty = true
+    if (playHistoryReady) flushPlayHistoryFile()
+    if (libraryCacheReady) flushLibraryCache()
+    if (queryCacheReady) flushQueryCache()
   }
 
   onPlayingChanged: noteActivity()
@@ -4338,6 +4557,53 @@ Item {
     onTriggered: root.flushLibraryCache()
   }
 
+  // Pages you have already opened, so reopening one draws it at once and the
+  // fresh copy replaces it when it lands.
+  QueryCache {
+    id: pageCache
+    limit: 16
+    staleMs: 300000
+    onChanged: if (root.queryCacheReady) queryCacheSaveTimer.restart()
+  }
+
+  // The whole cache is written at once, so this waits out a burst of page
+  // opening rather than writing after each one.
+  Timer {
+    id: queryCacheSaveTimer
+    interval: 5000
+    repeat: false
+    onTriggered: root.flushQueryCache()
+  }
+
+  // The page settles in pieces, so the whole of it is put away once, after the
+  // last piece lands.
+  Timer {
+    id: detailCacheSaveTimer
+    interval: 700
+    repeat: false
+    onTriggered: root.keepDetailPage()
+  }
+
+  Timer {
+    id: playlistCacheSaveTimer
+    interval: 700
+    repeat: false
+    onTriggered: root.keepPlaylistPage()
+  }
+
+  FileView {
+    id: queryCacheFile
+    path: root.queryCachePath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.applyQueryCacheFile(text())
+    onLoadFailed: root.applyQueryCacheFile("")
+    onSaveFailed: {
+      if (!ensureStateDir.running) ensureStateDir.running = true
+    }
+  }
+
   Timer {
     id: discoverRebuildTimer
     interval: 900
@@ -4417,8 +4683,10 @@ Item {
   Process {
     id: scanArtwork
     running: false
-    command: ["/usr/bin/sh", "-c",
-      "mkdir -p '" + root.artworkDir + "' && ls -1 '" + root.artworkDir + "'"]
+    // The directory is passed as an argument, not spliced into the command:
+    // it is built from HOME and XDG_CACHE_HOME, which are not ours to trust.
+    command: ["/usr/bin/sh", "-c", 'mkdir -p "$1" && ls -1 "$1"', "sh",
+      root.artworkDir]
     stdout: StdioCollector {
       onStreamFinished: root.noteArtworkOnDisk(text)
     }
@@ -4440,6 +4708,7 @@ Item {
       if (!root.playHistoryReady) playHistoryFile.reload()
       else if (root.playHistoryDirty) root.flushPlayHistoryFile()
       if (!root.libraryCacheReady) libraryCacheFile.reload()
+      if (!root.queryCacheReady) queryCacheFile.reload()
     }
   }
 

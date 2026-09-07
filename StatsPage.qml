@@ -23,7 +23,13 @@ Item {
       0.22 + 0.24 * level)
   }
 
-  Component.onCompleted: if (service) service.loadStats()
+  Component.onCompleted: {
+    if (!service) return
+    service.loadStats()
+    // Top up the play record on the way in, so the counts above are what you
+    // have actually listened to rather than what the last poll happened to see.
+    service.refreshPlayHistory(false)
+  }
 
   Column {
     anchors.fill: parent

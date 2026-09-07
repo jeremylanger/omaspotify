@@ -1,4 +1,5 @@
 import QtQuick
+import qs.Commons
 
 // The panel's shortcut hint. Pages live in their own files, so this takes the
 // panel explicitly instead of reading it from the surrounding scope.

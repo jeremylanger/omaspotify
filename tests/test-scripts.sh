@@ -159,6 +159,15 @@ printf '%s\n' 'Desk speakers' 320 true 3 |
 grep -qx 'normalisation = true' "$test_root/config/omaspotify/playback.conf"
 grep -qx 'normalisation_pregain_db = 3' "$test_root/config/omaspotify/playback.conf"
 
+# A normalisation setting sent without its pregain is half a setting, not a
+# reason to quietly write the file without it.
+set +e
+printf '%s\n' 'Desk speakers' 320 true |
+  XDG_CONFIG_HOME="$test_root/config" "$source_root/scripts/configure-playback.sh"
+lone_norm_status=$?
+set -e
+[[ $lone_norm_status -eq 3 ]]
+
 # An out-of-range pregain or a non-boolean flag must be refused.
 for bad_norm in 'true 40' 'maybe 0'; do
   set +e
@@ -330,7 +339,10 @@ TEST_SYSTEMCTL_LOG="$systemctl_log" \
 installed_hash=$(sha256sum -- "$runtime_backend/omaspotify-backend")
 source_build_hash=$(sha256sum -- "$mock_target/release/omaspotify-backend")
 [[ ${installed_hash%% *} == "${source_build_hash%% *}" ]]
-cmp -s -- "$source_root/systemd/omaspotify.service" "$runtime_backend_unit"
+# The unit has to point at the runtime and config directories setup actually
+# used, not at the defaults baked into the template.
+grep -qxF -- "ExecStart=$runtime_backend/omaspotify-backend --config-path=$runtime_config/omaspotify/playback.conf" \
+  "$runtime_backend_unit"
 PATH="$mock_bin:$PATH" \
 XDG_CONFIG_HOME="$runtime_config" \
 OMASPOTIFY_RUNTIME_DIR="$runtime_backend" \
@@ -539,6 +551,10 @@ grep -qx 'normalisation_pregain_db = 0' "$source_root/config/playback.conf"
 grep -qx 'no_audio_cache = false' "$source_root/config/playback.conf"
 grep -qx 'max_cache_size = 1000000000' "$source_root/config/playback.conf"
 ! grep -q 'Conflicts=' "$source_root/systemd/omaspotify.service"
+# With nothing set, the unit still lands on the documented default paths.
+env -u XDG_CONFIG_HOME -u OMASPOTIFY_RUNTIME_DIR HOME="$test_root/home" \
+  "$source_root/scripts/render-unit.sh" |
+  grep -qxF -- "ExecStart=$test_root/home/.local/lib/omaspotify/omaspotify-backend --config-path=$test_root/home/.config/omaspotify/playback.conf"
 grep -qx 'Environment=PULSE_LATENCY_MSEC=30' \
   "$source_root/systemd/omaspotify.service"
 grep -qx 'Environment=TOKIO_WORKER_THREADS=2' \

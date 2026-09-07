@@ -13,7 +13,9 @@ fi
 normalisation=""
 pregain=""
 normalisation_specified=0
-if IFS= read -r normalisation && IFS= read -r pregain; then
+if IFS= read -r normalisation && [[ -n $normalisation ]]; then
+  # Normalisation without its pregain is half a setting, not a default.
+  IFS= read -r pregain || exit 3
   normalisation_specified=1
 fi
 

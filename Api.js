@@ -558,6 +558,42 @@ function mergePlayHistory(stored, fresh) {
   return out
 }
 
+// Records this big cost more to compare by stringifying than they cost to
+// build, and they are rebuilt on every page of the library crawl.
+function sameTimeMap(left, right) {
+  return sameKeys(left, right, function(a, b) { return a === b })
+}
+
+function sameTouchDates(left, right) {
+  return sameKeys(left, right, function(a, b) {
+    return playTimeOf(a) === playTimeOf(b) && playSourceOf(a) === playSourceOf(b)
+  })
+}
+
+function sameLikedIndex(left, right) {
+  return sameKeys(left, right, function(a, b) {
+    var one = Array.isArray(a) ? a : []
+    var two = Array.isArray(b) ? b : []
+    if (one.length !== two.length) return false
+    for (var i = 0; i < one.length; i++)
+      if (String(one[i]) !== String(two[i])) return false
+    return true
+  })
+}
+
+function sameKeys(left, right, equal) {
+  var a = left && typeof left === "object" ? left : ({})
+  var b = right && typeof right === "object" ? right : ({})
+  var count = 0
+  for (var k in a) {
+    if (!a.hasOwnProperty(k)) continue
+    if (!b.hasOwnProperty(k) || !equal(a[k], b[k])) return false
+    count++
+  }
+  for (var other in b) if (b.hasOwnProperty(other)) count--
+  return count === 0
+}
+
 // Spotify has no "my liked songs by this artist" endpoint, so the crawl that
 // already reads every liked song builds the index as it goes. Only ids are
 // kept; the tracks themselves are fetched when an artist page opens.
@@ -795,6 +831,110 @@ function encodeLibraryCache(playlists, savedAlbums, followedArtists, savedShows,
     savedShows: savedShows || [],
     fetchedAt: Number(fetchedAt) || 0
   })
+}
+
+// A page you have already opened is drawn from the answer we kept while a
+// fresh one is fetched behind it, the way a query cache works on the web.
+// Entries carry when they were written so the page can say whether what it is
+// showing still counts as current.
+var QUERY_CACHE_VERSION = 1
+
+function queryCacheKey(parts) {
+  var list = Array.isArray(parts) ? parts : [parts]
+  var out = []
+  for (var i = 0; i < list.length; i++)
+    out.push(list[i] === null || list[i] === undefined ? "" : String(list[i]))
+  return out.join(":")
+}
+
+// missing: there is nothing to draw, so the page has to wait for Spotify.
+// fresh: draw it and ask for nothing. stale: draw it and refetch behind it.
+function queryCacheState(entry, nowMs, staleMs) {
+  if (!entry || entry.data === undefined || entry.data === null) return "missing"
+  return timestampIsFresh(entry.updatedAt, nowMs, staleMs) ? "fresh" : "stale"
+}
+
+function putQueryEntry(entries, order, key, data, nowMs, limit) {
+  var name = String(key || "")
+  var nextEntries = shallowCopy(entries)
+  var nextOrder = Array.isArray(order) ? order.slice() : []
+  if (!name) return { entries: nextEntries, order: nextOrder }
+  nextEntries[name] = { updatedAt: Number(nowMs) || 0, data: data }
+  var evicted = touchBoundedOrder(nextOrder, name, limit)
+  if (evicted) delete nextEntries[evicted]
+  return { entries: nextEntries, order: nextOrder }
+}
+
+function dropQueryEntry(entries, order, key) {
+  var name = String(key || "")
+  var nextEntries = shallowCopy(entries)
+  var nextOrder = []
+  var source = Array.isArray(order) ? order : []
+  delete nextEntries[name]
+  for (var i = 0; i < source.length; i++)
+    if (String(source[i]) !== name) nextOrder.push(String(source[i]))
+  return { entries: nextEntries, order: nextOrder }
+}
+
+function encodeQueryCache(entries, order) {
+  return JSON.stringify({
+    version: QUERY_CACHE_VERSION,
+    order: Array.isArray(order) ? order : [],
+    entries: entries || ({})
+  })
+}
+
+// Anything older than the given age is dropped on the way in: showing a page
+// from last month before the fresh one lands is worse than showing nothing.
+function parseQueryCache(raw, nowMs, maxAgeMs) {
+  var record = plainObject(parseJson(raw, ({})))
+  var empty = { entries: ({}), order: [] }
+  if (Number(record.version) !== QUERY_CACHE_VERSION) return empty
+  var stored = plainObject(record.entries)
+  var order = Array.isArray(record.order) ? record.order : []
+  var out = { entries: ({}), order: [] }
+  for (var i = 0; i < order.length; i++) {
+    var key = String(order[i] || "")
+    var entry = stored[key]
+    if (!key || !entry || entry.data === undefined || entry.data === null) continue
+    if (!timestampIsFresh(entry.updatedAt, nowMs, maxAgeMs)) continue
+    out.entries[key] = { updatedAt: Number(entry.updatedAt) || 0, data: entry.data }
+    out.order.push(key)
+  }
+  return out
+}
+
+// A page with a header and no rows is half an answer; drawing it from the
+// cache would only replace one empty page with another.
+function pageSnapshotHasContent(snapshot) {
+  if (!snapshot || !snapshot.item) return false
+  for (var key in snapshot) {
+    if (!snapshot.hasOwnProperty(key)) continue
+    if (Array.isArray(snapshot[key]) && snapshot[key].length > 0) return true
+  }
+  return false
+}
+
+// Long pages are trimmed before being kept, because the whole cache is written
+// to disk. A trimmed list loses its cursor: paging on from where the untrimmed
+// list stopped would skip every row that was cut.
+function cappedPageSnapshot(snapshot, limit) {
+  var cap = Math.max(1, Math.floor(Number(limit) || 1))
+  var out = ({})
+  var cut = []
+  for (var key in snapshot) {
+    if (!snapshot.hasOwnProperty(key)) continue
+    var value = snapshot[key]
+    if (Array.isArray(value) && value.length > cap) {
+      out[key] = value.slice(0, cap)
+      cut.push(key)
+    } else out[key] = value
+  }
+  for (var i = 0; i < cut.length; i++) {
+    var cursor = cut[i] === "items" ? "next" : cut[i] + "Next"
+    if (out.hasOwnProperty(cursor)) out[cursor] = ""
+  }
+  return out
 }
 
 // The library changes rarely, so a recent copy is trusted rather than
@@ -1968,6 +2108,8 @@ function artworkCacheName(url) {
   return hash.toString(36) + text.length.toString(36) + ".img"
 }
 
+// These are handed straight to curl, which reads a leading dash as an option
+// and will happily fetch a scheme that is not the web. Artwork is https.
 function artworkUrls(items, cached) {
   var rows = Array.isArray(items) ? items : []
   var have = cached && typeof cached === "object" ? cached : {}
@@ -1975,7 +2117,8 @@ function artworkUrls(items, cached) {
   var out = []
   for (var i = 0; i < rows.length; i++) {
     var url = rows[i] && rows[i].imageUrl ? String(rows[i].imageUrl) : ""
-    if (!url || seen[url] || have[url]) continue
+    if (url.indexOf("https://") !== 0) continue
+    if (seen[url] || have[url]) continue
     seen[url] = true
     out.push(url)
   }
@@ -1987,9 +2130,11 @@ function artworkUrls(items, cached) {
 // question directly, in one request each.
 function artistTopTracksRequest(artist) {
   if (!artist || !artist.id || artist.type !== "artist") return null
+  // No market: with a signed-in account Spotify uses that account's country,
+  // which is what we want and one less thing to get wrong.
   return {
     path: "/artists/" + encodeURIComponent(String(artist.id)) + "/top-tracks",
-    query: { market: "from_token" }
+    query: null
   }
 }
 
@@ -1997,7 +2142,7 @@ function artistAlbumsRequest(artist) {
   if (!artist || !artist.id || artist.type !== "artist") return null
   return {
     path: "/artists/" + encodeURIComponent(String(artist.id)) + "/albums",
-    query: { include_groups: "album,single", limit: 50, market: "from_token" }
+    query: { include_groups: "album,single", limit: 50 }
   }
 }
 

@@ -507,7 +507,7 @@ All three can coexist **as long as identities don't collide**.
   loudness-gap experiment; watch `pactl list sink-inputs` to confirm which client is audible
 - Only one of the three should be *playing* at a time
 
-## Phase G — pages, speed and the listening record
+## Phase H — pages, speed and the listening record
 
 Done, all verified against the real account and the running app.
 
@@ -580,6 +580,78 @@ work instead of on the page someone opened.
 
 This is as far as client-side scheduling goes. The remaining slowness is the
 shared client id, not our scheduling.
+
+## Phase I — review of everything since the fork, and a page cache
+
+A full read of the ~10,000 lines changed since `6024f31`, plus CodeRabbit
+against the same range. Every finding was checked against the code before it
+was acted on; the ones left alone are named below with the reason.
+
+**A page you have already opened**
+
+Pages used to be emptied and fetched from scratch on every open. They now draw
+from the answer we kept and are checked behind the page, the way a query cache
+works on the web. TanStack Query itself is not an option here — there is no
+npm in a Quickshell plugin — so the method is what was borrowed: an entry per
+page, a staleness clock, one fetch per key at a time, and eviction by age.
+
+- `QueryCache.qml`, free of Quickshell types so it is unit tested like
+  `SleepTimer`; the pure parts live in `Api.js` and are tested there
+- 16 pages, 200 rows each, fresh for five minutes, dropped after a week
+- Kept in `~/.local/state/omaspotify/queries.json`, so this works from a cold
+  start, not just within a session
+- A page drawn from the cache is never emptied first, and a failed check
+  leaves what is on screen alone
+- A page still on screen from the cache does not renew its own date, so it
+  cannot stay "fresh" forever by being reopened
+- Editing a playlist drops what we kept of it: every edit comes back with a
+  new snapshot id, which is the one place that knows
+
+**Bugs found and fixed**
+
+- Plays were counted before `plays.json` had been read back, from a watermark
+  of zero, and then counted again against the record — the listening counts
+  could double
+- A 600-entry limit was passed to a merge that never took one. The record is
+  meant to keep everything, so the dead argument went rather than the data
+- Signing out left the listening record, the library cache and every kept page
+  on disk and in memory, for the next account to inherit
+- Comparing the listening record stringified 690 KB twice per page of the
+  liked-song crawl, 105 times
+- Keyboard navigation in the library sidebar drove the list view even in grid
+  view, where it is hidden; and opening a row there treated an album, artist or
+  podcast as a playlist
+- The compact library dropdown listed rows that could not be opened at all
+- The keyboard cursor pointed at previous/next while a podcast plays, where
+  back 15 / forward 30 are what is on screen
+- A listening range that failed to load was kept as an empty answer, which
+  stopped it ever being asked for again
+- The playback unit hardcoded the default paths while every script honours
+  `OMASPOTIFY_RUNTIME_DIR` and `XDG_CONFIG_HOME`
+- `market=from_token` is not a country code Spotify accepts
+- The device name overflowed its row instead of eliding
+- `PanelKeyHint` read `Color` without importing it; `PlaylistPicker` left the
+  keyboard nowhere on close
+- A normalisation setting sent without its pregain was quietly dropped
+
+**Hardening**
+
+- Artwork is fetched over https only, and curl is told to refuse anything else.
+  The urls come out of Spotify's answers and go straight into an argv, where a
+  leading dash reads as an option
+- The artwork scan no longer builds a shell command out of `XDG_CACHE_HOME`
+
+**Left alone, deliberately**
+
+- Migrating the original plugin's credentials and removing its units: the fork
+  installs *alongside* it on purpose, and has never shipped a release
+- The duplicate copyright line in `LICENSE`: keeping the upstream notice is
+  what MIT asks of a fork
+- The `omarchy-spotify` paths in the two-engines appendix: that section
+  describes the state before Phase B, where those paths were correct
+- A duplicated sentence in Settings, and the "Choose a playlist…" label on a
+  dropdown that now lists the whole library — both are wording, which is
+  Jeremy's call
 
 ## Still open
 

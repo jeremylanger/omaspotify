@@ -715,10 +715,15 @@ TestCase {
   }
 
   function test_artworkCache_collectsTheUrlsWorthKeeping() {
-    var items = [{ imageUrl: "u1" }, { imageUrl: "" }, null, { imageUrl: "u2" },
-      { imageUrl: "u1" }]
-    compare(Api.artworkUrls(items, ({})).join(","), "u1,u2", "each url once")
-    compare(Api.artworkUrls(items, { "u1": true }).join(","), "u2",
+    var one = "https://i.scdn.co/image/one"
+    var two = "https://i.scdn.co/image/two"
+    var items = [{ imageUrl: one }, { imageUrl: "" }, null, { imageUrl: two },
+      { imageUrl: one }]
+    compare(Api.artworkUrls(items, ({})).join(","), one + "," + two,
+      "each url once")
+    var have = ({})
+    have[one] = true
+    compare(Api.artworkUrls(items, have).join(","), two,
       "already-kept artwork is not fetched again")
     compare(Api.artworkUrls(null, ({})).length, 0)
   }
@@ -744,11 +749,14 @@ TestCase {
   function test_artistCatalog_usesTheDirectEndpointsInsteadOfSearch() {
     var artist = { id: "a1", type: "artist", name: "Someone" }
     compare(Api.artistTopTracksRequest(artist).path, "/artists/a1/top-tracks")
-    compare(Api.artistTopTracksRequest(artist).query.market, "from_token")
+    // Spotify takes the country off the signed-in account. "from_token" is an
+    // old spelling of that and is no longer a country code it accepts.
+    compare(Api.artistTopTracksRequest(artist).query, null)
     compare(Api.artistTopTracksRequest(null), null)
 
     var albums = Api.artistAlbumsRequest(artist)
     compare(albums.path, "/artists/a1/albums")
+    compare(albums.query.market, undefined)
     compare(albums.query.limit, 50)
     verify(albums.query.include_groups.indexOf("album") >= 0)
     verify(albums.query.include_groups.indexOf("single") >= 0)
@@ -2727,5 +2735,123 @@ TestCase {
     compare(Api.searchEscapeAction(true, true, "   ", false), "blur")
     compare(Api.searchEscapeAction(true, false, "", false), "")
     compare(Api.searchEscapeAction(false, true, "query", true), "")
+  }
+
+
+  // These records reach hundreds of kilobytes. Comparing two of them by
+  // stringifying both costs more than the merge that produced them.
+  function test_recordCompare_spotsAChangeWithoutStringifyingTheRecord() {
+    verify(Api.sameTimeMap({ "a": 1, "b": 2 }, { "b": 2, "a": 1 }))
+    verify(!Api.sameTimeMap({ "a": 1 }, { "a": 2 }))
+    verify(!Api.sameTimeMap({ "a": 1 }, { "a": 1, "b": 2 }))
+    verify(!Api.sameTimeMap({ "a": 1, "b": 2 }, { "a": 1 }))
+    verify(Api.sameTimeMap(null, ({})))
+
+    verify(Api.sameTouchDates({ "a": { at: 1, source: "liked" } },
+      { "a": { at: 1, source: "liked" } }))
+    verify(!Api.sameTouchDates({ "a": { at: 1, source: "liked" } },
+      { "a": { at: 1, source: "saved" } }))
+    verify(!Api.sameTouchDates({ "a": { at: 1, source: "liked" } },
+      { "a": { at: 2, source: "liked" } }))
+
+    verify(Api.sameLikedIndex({ "ar": ["t1", "t2"] }, { "ar": ["t1", "t2"] }))
+    verify(!Api.sameLikedIndex({ "ar": ["t1", "t2"] }, { "ar": ["t2", "t1"] }))
+    verify(!Api.sameLikedIndex({ "ar": ["t1"] }, { "ar": ["t1", "t2"] }))
+    verify(!Api.sameLikedIndex({ "ar": ["t1"] }, ({})))
+  }
+
+  // Artwork urls come back inside Spotify's answers and are handed straight to
+  // curl. Anything that is not a plain https address is not artwork.
+  function test_artworkCache_onlyFetchesOverHttps() {
+    var items = [{ imageUrl: "https://i.scdn.co/image/one" },
+      { imageUrl: "http://i.scdn.co/image/two" },
+      { imageUrl: "file:///etc/passwd" },
+      { imageUrl: "-o/tmp/owned" },
+      { imageUrl: "https://i.scdn.co/image/three" }]
+    compare(Api.artworkUrls(items, ({})).join(","),
+      "https://i.scdn.co/image/one,https://i.scdn.co/image/three")
+  }
+
+  // A page you have already opened is drawn from the last answer while a
+  // fresh one is fetched behind it.
+  function test_queryCache_saysWhetherAnEntryCanBeDrawnOrMustBeFetched() {
+    compare(Api.queryCacheState(null, 1000, 500), "missing")
+    compare(Api.queryCacheState({ updatedAt: 900 }, 1000, 500), "missing",
+      "an entry with no data is nothing to draw")
+    compare(Api.queryCacheState({ updatedAt: 900, data: ({}) }, 1000, 500), "fresh")
+    compare(Api.queryCacheState({ updatedAt: 100, data: ({}) }, 1000, 500), "stale")
+    compare(Api.queryCacheState({ updatedAt: 0, data: ({}) }, 1000, 500), "stale")
+  }
+
+  function test_queryCache_keyIsStableAcrossTheSamePage() {
+    compare(Api.queryCacheKey(["detail", "album", "abc"]), "detail:album:abc")
+    compare(Api.queryCacheKey(["playlist", null, undefined]), "playlist::")
+    compare(Api.queryCacheKey("plain"), "plain")
+  }
+
+  function test_queryCache_dropsTheLeastRecentlyWrittenPageOverTheLimit() {
+    var state = { entries: ({}), order: [] }
+    state = Api.putQueryEntry(state.entries, state.order, "a", { n: 1 }, 10, 2)
+    state = Api.putQueryEntry(state.entries, state.order, "b", { n: 2 }, 20, 2)
+    state = Api.putQueryEntry(state.entries, state.order, "c", { n: 3 }, 30, 2)
+    compare(state.order.join(","), "b,c")
+    compare(state.entries["a"], undefined, "the oldest page is forgotten")
+    compare(state.entries["c"].data.n, 3)
+    compare(state.entries["c"].updatedAt, 30)
+
+    var again = Api.putQueryEntry(state.entries, state.order, "b", { n: 9 }, 40, 2)
+    compare(again.order.join(","), "c,b", "writing again moves it to the front")
+    compare(again.entries["b"].data.n, 9)
+
+    var dropped = Api.dropQueryEntry(again.entries, again.order, "c")
+    compare(dropped.order.join(","), "b")
+    compare(dropped.entries["c"], undefined)
+  }
+
+  function test_queryCache_survivesAFileRoundTrip() {
+    var state = Api.putQueryEntry(({}), [], "detail:album:one", { items: [1, 2] },
+      5000, 10)
+    var back = Api.parseQueryCache(Api.encodeQueryCache(state.entries, state.order),
+      6000, 10000)
+    compare(back.order.join(","), "detail:album:one")
+    compare(back.entries["detail:album:one"].data.items.length, 2)
+    compare(back.entries["detail:album:one"].updatedAt, 5000)
+
+    var expired = Api.parseQueryCache(
+      Api.encodeQueryCache(state.entries, state.order), 60000, 10000)
+    compare(expired.order.length, 0, "an answer this old is not worth drawing")
+    compare(JSON.stringify(Api.parseQueryCache("not json", 1, 10)),
+      JSON.stringify({ entries: ({}), order: [] }))
+    compare(Api.parseQueryCache('{"version":99,"order":["a"],"entries":{"a":{}}}',
+      1, 10).order.length, 0, "a record written by another version is ignored")
+  }
+
+  // Half a page is not worth putting away, and a page kept forever is not
+  // worth the disk it sits on.
+  function test_queryCache_onlyKeepsAPageThatHasSomethingOnIt() {
+    verify(!Api.pageSnapshotHasContent(null))
+    verify(!Api.pageSnapshotHasContent({ items: [1] }))
+    verify(Api.pageSnapshotHasContent({ item: { id: "a" }, items: [1] }))
+    verify(Api.pageSnapshotHasContent({ item: { id: "a" }, songs: [1] }))
+    verify(!Api.pageSnapshotHasContent({ item: { id: "a" }, items: [] }))
+  }
+
+  function test_queryCache_trimsALongPageBeforeKeepingIt() {
+    var snapshot = { item: { id: "a" }, items: [1, 2, 3, 4], songs: [1, 2, 3],
+      next: "cursor" }
+    var capped = Api.cappedPageSnapshot(snapshot, 2)
+    compare(capped.items.length, 2)
+    compare(capped.songs.length, 2)
+    compare(capped.next, "", "a trimmed page cannot page on from where it stopped")
+    compare(capped.item.id, "a")
+    compare(snapshot.items.length, 4, "the page on screen is left alone")
+    compare(Api.cappedPageSnapshot({ item: { id: "a" }, items: [1], next: "c" },
+      5).next, "c", "an untrimmed page keeps its cursor")
+
+    // Only the list that was cut loses its place.
+    var mixed = Api.cappedPageSnapshot({ item: { id: "a" }, songs: [1, 2, 3],
+      songsNext: "more-songs", albums: [1], albumsNext: "more-albums" }, 2)
+    compare(mixed.songsNext, "")
+    compare(mixed.albumsNext, "more-albums")
   }
 }

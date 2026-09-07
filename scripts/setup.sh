@@ -118,11 +118,12 @@ fi
 
 printf '%s\n' "$device_name" | "$source_root/scripts/configure-playback.sh"
 if (( backend_ready )); then
+  rendered_unit=$("$source_root/scripts/render-unit.sh")
   if [[ ! -f $backend_unit_file ]] \
-      || ! cmp -s -- "$source_root/systemd/omaspotify.service" "$backend_unit_file"; then
+      || ! printf '%s\n' "$rendered_unit" | cmp -s -- - "$backend_unit_file"; then
     unit_changed=1
   fi
-  install -m 644 -- "$source_root/systemd/omaspotify.service" "$backend_unit_file"
+  printf '%s\n' "$rendered_unit" | install -m 644 -- /dev/stdin "$backend_unit_file"
 fi
 systemctl --user daemon-reload
 
