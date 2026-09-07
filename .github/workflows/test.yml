@@ -47,7 +47,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes \
             qt6-declarative-dev-tools qml6-module-qtquick qml6-module-qttest \
-            qml6-module-qtquick-controls qml6-module-qtquick-layouts
+            qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-window qml6-module-qtqml-workerscript
 
       - name: Run QML tests
         env:

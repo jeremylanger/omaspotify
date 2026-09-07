@@ -10,7 +10,9 @@ Changes below start from the fork point. For the history of the original plugin,
   directory, and a duplicate copy of a screenshot shipped as `preview.png`.
 - Shrank the documentation screenshots from 3200px to 1600px wide.
 - Lint every source file by glob so a new one is never missed.
-- Run the test suite in CI on every push and pull request.
+- Run the test suite in CI on every push and pull request. CI installs the two
+  QtQuick modules that `--no-install-recommends` was leaving out, without which
+  no QML test could compile at all.
 - Removed the legacy spotifyd playback engine. The Rust backend is now the only
   engine, so there is no unit probe, no distro package fallback, and no second
   set of volume and position handling.
