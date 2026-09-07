@@ -402,6 +402,121 @@ function normalizedShortcutPlayer(value) {
 // normalises to its own target, so a level is a pregain offset from Normal.
 var VOLUME_LEVEL_PREGAIN_DB = { Loud: 3, Normal: 0, Quiet: -5 }
 
+// How the library sidebar can be ordered. "library" is Spotify's own order,
+// which /me/playlists returns verbatim, so it is the default.
+var LIBRARY_SORT_MODES = ["library", "recent", "added", "alpha"]
+var LIBRARY_VIEW_MODES = ["compact-list", "list", "compact-grid", "grid"]
+
+// Rank contexts by the newest play seen for each. Spotify only returns the last
+// 50 plays, so this is a shallow window by design.
+function recentContextPlayTimes(payload) {
+  var items = payload && Array.isArray(payload.items) ? payload.items : []
+  var times = {}
+  for (var i = 0; i < items.length; i++) {
+    var row = items[i]
+    var uri = row && row.context ? String(row.context.uri || "") : ""
+    if (!uri) continue
+    var at = Date.parse(String(row.played_at || ""))
+    if (!isFinite(at)) continue
+    if (!times[uri] || at > times[uri]) times[uri] = at
+  }
+  return times
+}
+
+function librarySortModes() {
+  return LIBRARY_SORT_MODES.slice()
+}
+
+function libraryViewModes() {
+  return LIBRARY_VIEW_MODES.slice()
+}
+
+function normalizedLibrarySort(value) {
+  var mode = String(value || "")
+  return LIBRARY_SORT_MODES.indexOf(mode) >= 0 ? mode : "library"
+}
+
+function normalizedLibraryView(value) {
+  var mode = String(value || "")
+  return LIBRARY_VIEW_MODES.indexOf(mode) >= 0 ? mode : "list"
+}
+
+// Order the sidebar. Pinned items lead, in the order they were pinned; the rest
+// follow the chosen mode. Items the mode cannot rank — a playlist has no added
+// date, an artist never played has no play time — keep Spotify's order at the
+// bottom rather than being interleaved as though they were oldest.
+function sortedLibraryItems(items, mode, playedAt, pinned) {
+  var source = Array.isArray(items) ? items : []
+  var order = normalizedLibrarySort(mode)
+  var plays = playedAt && typeof playedAt === "object" ? playedAt : {}
+  var pins = Array.isArray(pinned) ? pinned : []
+
+  var decorated = []
+  for (var i = 0; i < source.length; i++) {
+    var item = source[i]
+    if (!item) continue
+    var uri = String(item.uri || "")
+    decorated.push({
+      item: item,
+      index: i,
+      uri: uri,
+      pinRank: pins.indexOf(uri),
+      name: String(item.name || "").toLowerCase(),
+      addedAt: Number(item.addedAt),
+      playedAt: Number(plays[uri])
+    })
+  }
+
+  function rankedFirst(a, b, valueOf) {
+    var av = valueOf(a)
+    var bv = valueOf(b)
+    var aHas = isFinite(av) && av > 0
+    var bHas = isFinite(bv) && bv > 0
+    if (aHas && bHas) return bv - av
+    if (aHas !== bHas) return aHas ? -1 : 1
+    return a.index - b.index
+  }
+
+  decorated.sort(function(a, b) {
+    if (a.pinRank >= 0 || b.pinRank >= 0) {
+      if (a.pinRank >= 0 && b.pinRank >= 0) return a.pinRank - b.pinRank
+      return a.pinRank >= 0 ? -1 : 1
+    }
+    if (order === "alpha") {
+      if (a.name !== b.name) return a.name < b.name ? -1 : 1
+      return a.index - b.index
+    }
+    if (order === "added") return rankedFirst(a, b, function(v) { return v.addedAt })
+    if (order === "recent") return rankedFirst(a, b, function(v) { return v.playedAt })
+    return a.index - b.index
+  })
+
+  var result = []
+  for (var j = 0; j < decorated.length; j++) {
+    var entry = decorated[j]
+    var copy = shallowCopy(entry.item)
+    if (entry.pinRank >= 0) copy.pinned = true
+    result.push(copy)
+  }
+  return result
+}
+
+// Spotify allows four pins; pinning a fifth drops the oldest.
+function togglePinned(pinned, uri, limit) {
+  var list = Array.isArray(pinned) ? pinned.slice() : []
+  var value = String(uri || "")
+  if (!value) return list
+  var cap = Math.max(1, Math.floor(Number(limit) || 4))
+  var at = list.indexOf(value)
+  if (at >= 0) {
+    list.splice(at, 1)
+    return list
+  }
+  list.push(value)
+  while (list.length > cap) list.shift()
+  return list
+}
+
 function normalizedNormalizeVolume(value) {
   return String(value || "On") === "Off" ? "Off" : "On"
 }

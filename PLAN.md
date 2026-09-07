@@ -397,7 +397,18 @@ These are all in shared components, so one change lands on every screen at once.
 
 ### F3 — Structure
 
-- [ ] Grid view + thumbnails for playlists and albums (GridView + Image delegates)
+- [x] Library sidebar rebuilt. See `docs/LIBRARY-DATA.md` for what Spotify does and
+      does not provide, established by testing every endpoint against a real account
+  - [x] Mixed media, not just playlists: playlists, saved albums, followed artists
+        and saved shows in one list
+  - [x] Four view modes on a button in the sidebar, mirroring the native client:
+        compact list, list (with artwork), compact grid, grid
+  - [x] Sort control: library order (Spotify's own, and the default), recently
+        played, recently added, alphabetical
+  - [x] Local pinning, up to four, shown first with a marker. Spotify's own pins
+        are **not readable** — no Web API endpoint, and the internal rootlist carries
+        no pin state either. Both were checked directly
+- [ ] Grid view for the main content area (the sidebar has one now)
 - [ ] Full Now Playing view: large art, dynamic background
 - [ ] Reorganize Settings into sections: Account / Playback / Appearance / Connect.
       It is one long scroll now, and new settings land below the fold

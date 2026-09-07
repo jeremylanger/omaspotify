@@ -46,7 +46,9 @@ Item {
     maxBarTextWidth: "240",
     audioQuality: "320 kbps",
     normalizeVolume: "On",
-    volumeLevel: "Normal"
+    volumeLevel: "Normal",
+    librarySort: "library",
+    libraryView: "list"
   })
   property var settings: Api.shallowCopy(defaultSettingValues)
 
@@ -98,6 +100,16 @@ Item {
     || daemonManager.authenticationBusy || daemonManager.credentialsClearBusy
     || !daemonManager.credentialsChecked || !daemonManager.requirementsChecked
   readonly property string loginProgress: loginProgressText()
+
+  property var recentContextPlays: ({})
+  readonly property var pinnedUris: {
+    var pins = sessionState && sessionState.pinnedUris
+    return Array.isArray(pins) ? pins : []
+  }
+  readonly property string librarySort:
+    Api.normalizedLibrarySort(settings.librarySort)
+  readonly property string libraryView:
+    Api.normalizedLibraryView(settings.libraryView)
 
   readonly property var mprisPlayers: Mpris.players ? Mpris.players.values : []
   readonly property var activePlayer: localEnginePlayer()
@@ -454,7 +466,8 @@ Item {
     var keys = ["deviceName", "idleShutdownMinutes", "showMiniPlayer",
       "shortcutPlayer", "shortcutHints", "showTrackTitle", "showArtistName",
       "showPausedTrack", "scrollBarText", "scrollSpeed", "maxBarTextWidth",
-      "audioQuality", "normalizeVolume", "volumeLevel"]
+      "audioQuality", "normalizeVolume", "volumeLevel",
+      "librarySort", "libraryView"]
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i]
       if (source[key] !== undefined) next[key] = source[key]
@@ -480,6 +493,8 @@ Item {
       : (quality.indexOf("160") === 0 ? "160 kbps" : "320 kbps")
     next.normalizeVolume = Api.normalizedNormalizeVolume(next.normalizeVolume)
     next.volumeLevel = Api.normalizedVolumeLevel(next.volumeLevel)
+    next.librarySort = Api.normalizedLibrarySort(next.librarySort)
+    next.libraryView = Api.normalizedLibraryView(next.libraryView)
     return next
   }
 
@@ -1059,6 +1074,9 @@ Item {
 
   function loadSidebarPlaylists() {
     if (!playlistsLoaded && !playlistsLoading) loadPlaylists(false)
+    if (!savedAlbumsLoaded && !savedAlbumsLoading) loadSavedAlbums(false)
+    if (!followedArtistsLoaded && !followedArtistsLoading) loadFollowedArtists(false)
+    if (!savedShowsLoaded && !savedShowsLoading) loadSavedShows(false)
   }
 
   function loadProfile() {
@@ -1113,8 +1131,48 @@ Item {
     if (detailItem && detailItem.type === "playlist") detailItem = updated(detailItem)
   }
 
+  readonly property var sidebarItems: Api.sortedLibraryItems(
+    sidebarSource(playlists, savedAlbums, followedArtists, savedShows),
+    librarySort, recentContextPlays, pinnedUris)
+
   function sidebarPlaylists() {
-    return playlists
+    return sidebarItems
+  }
+
+  // Spotify has no single "your library" feed, so the saved collections are
+  // merged here. Albums and shows carry an added date; playlists and artists
+  // do not, which is why the added sort leaves them in library order.
+  // Takes its inputs as arguments so the property above declares them as
+  // binding dependencies.
+  function sidebarSource(lists, albums, artists, shows) {
+    var rows = []
+    var groups = [lists, albums, artists, shows]
+    for (var g = 0; g < groups.length; g++) {
+      var group = Array.isArray(groups[g]) ? groups[g] : []
+      for (var i = 0; i < group.length; i++) rows.push(group[i])
+    }
+    return rows
+  }
+
+  function togglePinnedItem(item) {
+    var uri = item && item.uri ? String(item.uri) : ""
+    if (!uri) return
+    var next = Api.shallowCopy(sessionState)
+    next.pinnedUris = Api.togglePinned(pinnedUris, uri, 4)
+    persistSession(next)
+  }
+
+  function isPinned(item) {
+    var uri = item && item.uri ? String(item.uri) : ""
+    return !!uri && pinnedUris.indexOf(uri) >= 0
+  }
+
+  function setLibrarySort(mode) {
+    persistSettings({ librarySort: Api.normalizedLibrarySort(mode) })
+  }
+
+  function setLibraryView(mode) {
+    persistSettings({ libraryView: Api.normalizedLibraryView(mode) })
   }
 
   function validRadioPlaylist(value) {
@@ -2186,6 +2244,7 @@ Item {
             return Api.normalizeTrack(value, 96)
           })
           root.recentTracks = page.items
+          root.recentContextPlays = Api.recentContextPlayTimes(payload)
         }
         root.finishHomeRequest(error)
       })

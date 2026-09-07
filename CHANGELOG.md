@@ -27,6 +27,10 @@ Changes below start from the fork point. For the history of the original plugin,
 - Fixed arrow-key navigation in the track context menu, which stopped working
   when the menu moved into its own file.
 - Renamed the sidebar heading to the app's own name.
+- Flattened the sidebar and player chrome: no frames, no tinted fills, and
+  consistent padding.
+- The library sidebar now lists albums, artists and podcasts alongside
+  playlists, with artwork, four view modes, four sort orders, and pinning.
 - Moved the ten player screens out of Panel.qml into their own files, taking it
   from 6,636 to 4,421 lines. The panel and its screens now talk through one
   explicit property instead of shared file scope.

@@ -2022,6 +2022,72 @@ Item {
     return "Songs, artists, albums, playlists, podcasts and audiobooks"
   }
 
+  function librarySortLabel() {
+    var mode = service ? service.librarySort : "library"
+    if (mode === "recent") return "Recently played"
+    if (mode === "added") return "Recently added"
+    if (mode === "alpha") return "Alphabetical"
+    return "Library order"
+  }
+
+  function cycleLibrarySort() {
+    if (!service) return
+    var modes = Api.librarySortModes()
+    var at = modes.indexOf(service.librarySort)
+    service.setLibrarySort(modes[(at + 1) % modes.length])
+  }
+
+  function libraryViewIcon() {
+    var mode = service ? service.libraryView : "list"
+    if (mode === "compact-list") return "󰉹"
+    if (mode === "grid") return "󰕰"
+    if (mode === "compact-grid") return "󰋣"
+    return "󰋲"
+  }
+
+  function libraryViewLabel() {
+    var mode = service ? service.libraryView : "list"
+    if (mode === "compact-list") return "Compact list"
+    if (mode === "grid") return "Grid"
+    if (mode === "compact-grid") return "Compact grid"
+    return "List"
+  }
+
+  function cycleLibraryView() {
+    if (!service) return
+    var modes = Api.libraryViewModes()
+    var at = modes.indexOf(service.libraryView)
+    service.setLibraryView(modes[(at + 1) % modes.length])
+  }
+
+  readonly property bool libraryViewIsGrid: service
+    && service.libraryView.indexOf("grid") >= 0
+  readonly property bool libraryViewIsCompact: service
+    && service.libraryView.indexOf("compact") === 0
+  readonly property int libraryRowHeight: libraryViewIsCompact
+    ? Style.space(26) : Style.space(40)
+  readonly property int libraryThumbSize: libraryViewIsCompact
+    ? Style.space(20) : Style.space(32)
+
+  function sidebarItemIcon(item) {
+    if (item && item.pinned) return "󰐃"
+    var type = item ? String(item.type || "playlist") : "playlist"
+    if (type === "artist") return "󰠃"
+    if (type === "album") return "󰀥"
+    if (type === "show" || type === "episode") return "󰦔"
+    return "󰲸"
+  }
+
+  function openSidebarItem(item) {
+    if (!item || !service) return
+    if (String(item.type || "playlist") === "playlist") {
+      chooseTab("playlists")
+      service.openPlaylist(item)
+      return
+    }
+    openItem(item)
+  }
+
   function sidebarPlaylistName(item) {
     var name = item && item.name ? String(item.name) : "Playlist"
     return name.length > 22 ? name.substring(0, 21) + "…" : name
@@ -2671,15 +2737,89 @@ Item {
               }
             }
 
-            ListView {
-              id: playlistShortcuts
+            Row {
+              id: libraryControls
               visible: !root.compactWidth
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: libraryNavigation.bottom
+              anchors.margins: Style.space(2)
+              anchors.topMargin: Style.space(6)
+              height: visible ? implicitHeight : 0
+              spacing: Style.space(2)
+
+              Button {
+                id: librarySortButton
+                width: Math.max(40, parent.width - libraryViewButton.width
+                  - parent.spacing)
+                text: root.librarySortLabel()
+                iconText: "󰒺"
+                foreground: root.muted
+                leftAlign: true
+                focusable: false
+                tooltipText: "Sort the library"
+                onClicked: root.cycleLibrarySort()
+              }
+
+              Button {
+                id: libraryViewButton
+                iconText: root.libraryViewIcon()
+                foreground: root.muted
+                focusable: false
+                tooltipText: "View · " + root.libraryViewLabel()
+                onClicked: root.cycleLibraryView()
+              }
+            }
+
+            GridView {
+              id: playlistGrid
+              visible: !root.compactWidth && root.libraryViewIsGrid
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: libraryControls.bottom
               anchors.bottom: setupNavButton.top
               anchors.margins: Style.space(2)
-              model: root.service ? root.service.sidebarPlaylists() : []
+              model: root.service ? root.service.sidebarItems : []
+              cellWidth: Math.max(Style.space(56),
+                Math.floor(width / Math.max(1, Math.floor(width / Style.space(84)))))
+              cellHeight: root.libraryViewIsCompact
+                ? cellWidth : cellWidth + Style.space(16)
+              clip: true
+              reuseItems: true
+              keyNavigationEnabled: false
+
+              delegate: SidebarRow {
+                required property var modelData
+                width: playlistGrid.cellWidth
+                height: playlistGrid.cellHeight
+                item: modelData
+                compact: root.libraryViewIsCompact
+                grid: true
+                thumbnailSize: Math.min(width, height) - Style.space(10)
+                fallbackGlyph: root.sidebarItemIcon(modelData)
+                foreground: root.foreground
+                accent: root.accent
+                muted: root.muted
+                fontFamily: root.fontFamily
+                selected: root.currentTab === "playlists" && root.service
+                  && root.service.selectedPlaylist
+                  && root.service.selectedPlaylist.id === modelData.id
+                onActivated: root.openSidebarItem(modelData)
+                onContextRequested: {
+                  if (root.service) root.service.togglePinnedItem(modelData)
+                }
+              }
+            }
+
+            ListView {
+              id: playlistShortcuts
+              visible: !root.compactWidth && !root.libraryViewIsGrid
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: libraryControls.bottom
+              anchors.bottom: setupNavButton.top
+              anchors.margins: Style.space(2)
+              model: root.service ? root.service.sidebarItems : []
               clip: true
               spacing: Style.space(1)
               reuseItems: true
@@ -2702,27 +2842,31 @@ Item {
                     && !root.service.playlistsLoading) root.service.loadMorePlaylists()
               }
 
-              delegate: Button {
+              delegate: SidebarRow {
                 required property var modelData
                 required property int index
                 width: ListView.view.width
-                text: root.sidebarPlaylistName(modelData)
-                iconText: "󰲸"
+                height: root.libraryRowHeight
+                item: modelData
+                compact: root.libraryViewIsCompact
+                grid: false
+                thumbnailSize: root.libraryThumbSize
+                fallbackGlyph: root.sidebarItemIcon(modelData)
                 foreground: root.foreground
-                leftAlign: true
-                focusable: false
+                accent: root.accent
+                muted: root.muted
+                fontFamily: root.fontFamily
                 hasCursor: root.cursorOn("sidebar", "sidebar-playlists")
                   && ListView.isCurrentItem
                 selected: root.currentTab === "playlists" && root.service
                   && root.service.selectedPlaylist
                   && root.service.selectedPlaylist.id === modelData.id
-                tooltipText: modelData.name || "Playlist"
-                onClicked: {
-                  root.chooseTab("playlists")
-                  if (root.service) root.service.openPlaylist(modelData)
+                onActivated: root.openSidebarItem(modelData)
+                onContextRequested: {
+                  if (root.service) root.service.togglePinnedItem(modelData)
                 }
-                onHovered: function(on) {
-                  if (!on) return
+                onHoveredChanged: {
+                  if (!hovered) return
                   playlistShortcuts.currentIndex = index
                   root.setPanelCursor("sidebar", "sidebar-playlists")
                 }

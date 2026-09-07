@@ -204,6 +204,116 @@ TestCase {
     compare(Api.VOLUME_FLUSH_MS, 80)
   }
 
+  function test_recentContextPlayTimes_keepsTheLatestPlayPerContext() {
+    var payload = { items: [
+      { played_at: "2026-09-06T22:26:58.502Z",
+        context: { uri: "spotify:playlist:a", type: "playlist" } },
+      { played_at: "2026-09-06T20:00:00.000Z",
+        context: { uri: "spotify:playlist:a", type: "playlist" } },
+      { played_at: "2026-09-06T21:00:00.000Z",
+        context: { uri: "spotify:album:b", type: "album" } }
+    ] }
+    var out = Api.recentContextPlayTimes(payload)
+    verify(out["spotify:playlist:a"] > out["spotify:album:b"],
+      "the newest play for a context wins")
+  }
+
+  function test_recentContextPlayTimes_skipsPlaysWithoutAContext() {
+    var out = Api.recentContextPlayTimes({ items: [
+      { played_at: "2026-09-06T22:00:00.000Z", context: null },
+      { played_at: "2026-09-06T22:00:00.000Z" }
+    ] })
+    compare(Object.keys(out).length, 0)
+  }
+
+  function test_recentContextPlayTimes_toleratesJunk() {
+    compare(Object.keys(Api.recentContextPlayTimes(null)).length, 0)
+    compare(Object.keys(Api.recentContextPlayTimes({})).length, 0)
+    compare(Object.keys(Api.recentContextPlayTimes({ items: "no" })).length, 0)
+  }
+
+  function test_librarySortModes_areTheFourWeSupport() {
+    compare(Api.librarySortModes(), ["library", "recent", "added", "alpha"])
+    compare(Api.normalizedLibrarySort("alpha"), "alpha")
+    compare(Api.normalizedLibrarySort("nonsense"), "library")
+    compare(Api.normalizedLibrarySort(null), "library")
+  }
+
+  function test_libraryViewModes_areTheFourWeSupport() {
+    compare(Api.libraryViewModes(),
+      ["compact-list", "list", "compact-grid", "grid"])
+    compare(Api.normalizedLibraryView("grid"), "grid")
+    compare(Api.normalizedLibraryView("nonsense"), "list")
+  }
+
+  readonly property var sortFixture: [
+    { uri: "spotify:playlist:b", name: "Beta", addedAt: 0 },
+    { uri: "spotify:album:a", name: "alpha", addedAt: 3000 },
+    { uri: "spotify:artist:c", name: "Gamma", addedAt: 1000 }
+  ]
+
+  function test_librarySort_libraryKeepsSpotifysOwnOrder() {
+    var out = Api.sortedLibraryItems(sortFixture, "library", ({}), [])
+    compare([out[0].name, out[1].name, out[2].name], ["Beta", "alpha", "Gamma"])
+  }
+
+  function test_librarySort_alphaIgnoresCase() {
+    var out = Api.sortedLibraryItems(sortFixture, "alpha", ({}), [])
+    compare([out[0].name, out[1].name, out[2].name], ["alpha", "Beta", "Gamma"])
+  }
+
+  function test_librarySort_addedPutsNewestFirst() {
+    var out = Api.sortedLibraryItems(sortFixture, "added", ({}), [])
+    compare([out[0].name, out[1].name], ["alpha", "Gamma"])
+  }
+
+  // Playlists and artists carry no added date, so they must fall to the bottom
+  // in library order rather than be interleaved as if they were ancient.
+  function test_librarySort_addedKeepsUndatedItemsInLibraryOrderAtTheEnd() {
+    var items = [
+      { uri: "u:1", name: "No date one" },
+      { uri: "u:2", name: "Dated", addedAt: 500 },
+      { uri: "u:3", name: "No date two" }
+    ]
+    var out = Api.sortedLibraryItems(items, "added", ({}), [])
+    compare([out[0].name, out[1].name, out[2].name],
+      ["Dated", "No date one", "No date two"])
+  }
+
+  function test_librarySort_recentUsesPlayTimesThenLibraryOrder() {
+    var played = { "spotify:artist:c": 900, "spotify:playlist:b": 100 }
+    var out = Api.sortedLibraryItems(sortFixture, "recent", played, [])
+    compare([out[0].name, out[1].name, out[2].name],
+      ["Gamma", "Beta", "alpha"])
+  }
+
+  function test_librarySort_pinnedItemsComeFirstInPinOrder() {
+    var pinned = ["spotify:artist:c", "spotify:album:a"]
+    var out = Api.sortedLibraryItems(sortFixture, "alpha", ({}), pinned)
+    compare([out[0].name, out[1].name, out[2].name],
+      ["Gamma", "alpha", "Beta"])
+    verify(out[0].pinned === true)
+    verify(out[2].pinned !== true)
+  }
+
+  function test_librarySort_toleratesJunkInput() {
+    compare(Api.sortedLibraryItems(null, "alpha", ({}), []), [])
+    compare(Api.sortedLibraryItems([], "alpha", null, null), [])
+    var out = Api.sortedLibraryItems([{ uri: "x" }], "alpha", ({}), [])
+    compare(out.length, 1)
+  }
+
+  function test_togglePinned_addsRemovesAndCaps() {
+    var list = Api.togglePinned([], "a", 3)
+    compare(list, ["a"])
+    list = Api.togglePinned(list, "b", 3)
+    compare(list, ["a", "b"])
+    list = Api.togglePinned(list, "a", 3)
+    compare(list, ["b"], "pinning an already pinned item unpins it")
+    list = Api.togglePinned(["a", "b", "c"], "d", 3)
+    compare(list, ["b", "c", "d"], "oldest pin drops when the cap is reached")
+  }
+
   function test_normalizedNormalizeVolume_defaultsToOn() {
     compare(Api.normalizedNormalizeVolume("On"), "On")
     compare(Api.normalizedNormalizeVolume("Off"), "Off")
