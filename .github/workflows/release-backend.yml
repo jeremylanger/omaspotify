@@ -61,11 +61,11 @@ jobs:
 
       - name: Stage exact install artifact
         env:
-          ASSET: omarchy-spotify-backend-${{ matrix.architecture }}
+          ASSET: omaspotify-backend-${{ matrix.architecture }}
           CARGO_TARGET_DIR: ${{ runner.temp }}/backend-target
         run: |
           install -D -m 0755 \
-            "$CARGO_TARGET_DIR/${{ matrix.target }}/release/omarchy-spotify-backend" \
+            "$CARGO_TARGET_DIR/${{ matrix.target }}/release/omaspotify-backend" \
             "${{ runner.temp }}/release/$ASSET"
           "${{ runner.temp }}/release/$ASSET" --version
           sha256sum "${{ runner.temp }}/release/$ASSET"
@@ -73,13 +73,13 @@ jobs:
       - name: Attest exact install artifact
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
-          subject-path: ${{ runner.temp }}/release/omarchy-spotify-backend-${{ matrix.architecture }}
+          subject-path: ${{ runner.temp }}/release/omaspotify-backend-${{ matrix.architecture }}
 
       - name: Upload release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: backend-${{ matrix.architecture }}
-          path: ${{ runner.temp }}/release/omarchy-spotify-backend-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/release/omaspotify-backend-${{ matrix.architecture }}
           if-no-files-found: error
 
   release:
@@ -101,7 +101,7 @@ jobs:
       - name: Create release checksums
         run: |
           cd "${{ runner.temp }}/release"
-          sha256sum omarchy-spotify-backend-* >SHA256SUMS
+          sha256sum omaspotify-backend-* >SHA256SUMS
           cat SHA256SUMS
 
       - name: Attest checksum manifest
@@ -115,10 +115,10 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           gh release create "$RELEASE_TAG" \
-            "${{ runner.temp }}/release/omarchy-spotify-backend-x86_64" \
-            "${{ runner.temp }}/release/omarchy-spotify-backend-aarch64" \
+            "${{ runner.temp }}/release/omaspotify-backend-x86_64" \
+            "${{ runner.temp }}/release/omaspotify-backend-aarch64" \
             "${{ runner.temp }}/release/SHA256SUMS" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --generate-notes \
-            --title "Omarchy Spotify $RELEASE_TAG"
+            --title "OmaSpotify $RELEASE_TAG"

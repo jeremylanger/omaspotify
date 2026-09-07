@@ -8,15 +8,14 @@ if (( $# != 1 )); then
   exit 2
 fi
 
-runtime_dir=${OMARCHY_SPOTIFY_RUNTIME_DIR:-"$HOME/.local/lib/omarchy-spotify"}
-backend_binary="$runtime_dir/omarchy-spotify-backend"
+runtime_dir=${OMASPOTIFY_RUNTIME_DIR:-"$HOME/.local/lib/omaspotify"}
+backend_binary="$runtime_dir/omaspotify-backend"
 backend_source_id_file="$runtime_dir/backend-source.sha256"
 backend_binary_hash_file="$runtime_dir/backend-binary.sha256"
-backend_unit=omarchy-spotify.service
-fallback_unit=omarchy-spotifyd.service
+backend_unit=omaspotify.service
 config_root=${XDG_CONFIG_HOME:-"$HOME/.config"}
-installed_backend_unit="$config_root/systemd/user/omarchy-spotify.service"
-source_backend_unit="$source_root/systemd/omarchy-spotify.service"
+installed_backend_unit="$config_root/systemd/user/omaspotify.service"
+source_backend_unit="$source_root/systemd/omaspotify.service"
 state_root=${XDG_STATE_HOME:-"$HOME/.local/state"}
 cache_root=${XDG_CACHE_HOME:-"$HOME/.cache"}
 
@@ -39,17 +38,13 @@ backend_install_is_current() {
   [[ ${actual_binary_hash%% *} == "$expected_binary_hash" ]] || return 1
   [[ ! -f $source_backend_unit ]] \
     || { [[ -f $installed_backend_unit ]] \
-      && cmp -s -- "$source_backend_unit" "$installed_backend_unit"; }
+      && "$source_root/scripts/render-unit.sh" \
+        | cmp -s -- - "$installed_backend_unit"; }
 }
 
 preferred_unit() {
-  if backend_install_is_current && unit_exists "$backend_unit"; then
-    printf '%s\n' "$backend_unit"
-  elif command -v spotifyd >/dev/null 2>&1 && unit_exists "$fallback_unit"; then
-    printf '%s\n' "$fallback_unit"
-  else
-    return 1
-  fi
+  backend_install_is_current && unit_exists "$backend_unit" || return 1
+  printf '%s\n' "$backend_unit"
 }
 
 case $action in
@@ -58,8 +53,8 @@ case $action in
     ;;
   credentials)
     credential_paths=(
-      "$state_root/omarchy-spotify/oauth/credentials.json"
-      "$state_root/omarchy-spotify/zeroconf/credentials.json"
+      "$state_root/omaspotify/oauth/credentials.json"
+      "$state_root/omaspotify/zeroconf/credentials.json"
       "$cache_root/spotifyd/oauth/credentials.json"
       "$cache_root/spotifyd/zeroconf/credentials.json"
     )
@@ -77,7 +72,6 @@ case $action in
     ;;
   stop)
     systemctl --user stop "$backend_unit" 2>/dev/null || true
-    systemctl --user stop "$fallback_unit" 2>/dev/null || true
     ;;
   status)
     unit=$(preferred_unit) || exit 1

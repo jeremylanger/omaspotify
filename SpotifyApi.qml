@@ -20,7 +20,22 @@ Item {
   property int searchSerial: 0
   property var requestQueue: []
   property int requestsInFlight: 0
+  // Background jobs never take the last slots, so an opened page has somewhere
+  // to run even while the library is still loading.
+  property int backgroundInFlight: 0
+  property double lastBackgroundStartedAt: 0
+  property double lastInteractiveStartedAt: 0
+  // Every refusal widens the gap between background requests for this run.
+  property int backgroundRefusals: 0
+  readonly property int backgroundSpacingMs:
+    Api.backgroundSpacingForRefusals(backgroundRefusals)
+  // Every request is logged while we are still tuning this; raise it to see
+  // only the slow ones.
+  property int slowRequestMs: 0
   property double rateLimitedUntil: 0
+  // When the current pause began, so an opened page only waits a moment of it.
+  property double rateLimitedSince: 0
+  property bool cooldownProbeUsed: false
   property bool restrictInFlight: false
   property bool pumpingRequests: false
   property bool pumpAgain: false
@@ -56,18 +71,28 @@ Item {
     if (!job || job.finished === true) return
     job.finished = true
     removeTimedJob(job)
-    if (job.handle && job.handle.job === job) job.handle.job = null
     return true
   }
 
   function deliverJob(job, status, payload, error, xhr) {
-    var elapsed = job.queuedAt !== undefined
-      ? Math.max(0, now() - job.queuedAt) : 0
-    if (error || elapsed >= 2000)
-      console.warn("Spotify API " + String(job.method || "GET") + " "
-        + Api.redact(String(job.path || "")) + " finished in " + elapsed + " ms"
-        + (error ? ": " + Api.redact(error) : ""))
+    var ended = now()
+    var queuedAt = job.queuedAt !== undefined ? job.queuedAt : ended
+    var startedAt = job.startedAt !== undefined ? job.startedAt : queuedAt
+    var authedAt = job.authedAt !== undefined ? job.authedAt : startedAt
+    var elapsed = Math.max(0, ended - queuedAt)
+    if (error || elapsed >= slowRequestMs)
+      console.warn("Spotify API " + Api.requestTimingLine(job.method, job.path, {
+        queuedMs: Math.max(0, startedAt - queuedAt),
+        authMs: Math.max(0, authedAt - startedAt),
+        wireMs: Math.max(0, ended - authedAt)
+      }, {
+        inFlight: requestsInFlight,
+        background: backgroundInFlight,
+        queued: requestQueue.length,
+        priority: job.priority
+      }) + (error ? ": " + Api.redact(error) : ""))
     releaseRequestSlot(job.handle)
+    if (job.handle && job.handle.job === job) job.handle.job = null
     callbackIfCurrent(job, status, payload, error, xhr)
   }
 
@@ -128,6 +153,10 @@ Item {
   function releaseRequestSlot(handle) {
     if (handle && handle.slotOpen !== true) return
     if (handle) handle.slotOpen = false
+    if (handle && handle.countedBackground === true) {
+      handle.countedBackground = false
+      backgroundInFlight = Math.max(0, backgroundInFlight - 1)
+    }
     requestsInFlight = Math.max(0, requestsInFlight - 1)
     pumpRequests()
   }
@@ -140,18 +169,51 @@ Item {
     pumpingRequests = true
     pumpAgain = false
     while (requestsInFlight < Api.apiInFlightLimit(restrictInFlight)) {
-      var wait = Api.apiCooldownMs(now(), rateLimitedUntil)
-      if (wait > 0) {
-        rateLimitTimer.interval = Math.max(50, wait)
-        rateLimitTimer.restart()
+      var limit = Api.apiInFlightLimit(restrictInFlight)
+      var cooldown = Api.apiCooldownMs(now(), rateLimitedUntil)
+      var backgroundDelay = Api.backgroundDispatchDelay(lastBackgroundStartedAt,
+        lastInteractiveStartedAt, now(), backgroundSpacingMs)
+      var allowBackground = cooldown === 0 && backgroundDelay === 0
+        && backgroundInFlight < Api.backgroundInFlightLimit(limit)
+      var taken = Api.dequeueApiJob(requestQueue, allowBackground)
+      var job = taken.job
+      // While Spotify is refusing, only what the person is watching goes out.
+      if (job && cooldown > 0
+          && !Api.jobMayRunDuringCooldown(job, cooldownProbeUsed)) job = null
+      if (job) {
+        var wait = Api.foregroundCooldownMs(now(), rateLimitedUntil,
+          rateLimitedSince, Api.API_FOREGROUND_COOLDOWN_CAP_MS)
+        if (wait > 0) {
+          rateLimitTimer.interval = Math.max(50, wait)
+          rateLimitTimer.restart()
+          break
+        }
+      }
+      if (!job) {
+        if (cooldown > 0) {
+          rateLimitTimer.interval = Math.max(50, cooldown)
+          rateLimitTimer.restart()
+        } else if (backgroundDelay > 0 && requestQueue.length > 0) {
+          // Background work waiting only on its spacing gets woken up again.
+          backgroundPaceTimer.interval = backgroundDelay
+          backgroundPaceTimer.restart()
+        }
         break
       }
-      var taken = Api.dequeueApiJob(requestQueue)
+      if (cooldown > 0) cooldownProbeUsed = true
       requestQueue = taken.queue
-      if (!taken.job) break
-      taken.job.handle.slotOpen = true
+      job.handle.slotOpen = true
+      job.startedAt = now()
+      if (Api.apiJobPriority(job) < 0) {
+        // Counted on the handle, which outlives a job that gets cancelled.
+        job.handle.countedBackground = true
+        backgroundInFlight += 1
+        lastBackgroundStartedAt = now()
+      } else if (Api.apiJobPriority(job) >= 1) {
+        lastInteractiveStartedAt = now()
+      }
       requestsInFlight += 1
-      startJob(taken.job)
+      startJob(job)
     }
     pumpingRequests = false
     if (pumpAgain) pumpRequests()
@@ -167,6 +229,7 @@ Item {
     url = Api.appendQuery(url, job.query)
 
     auth.withAccessToken(function(token, tokenError) {
+      job.authedAt = now()
       if (handle.aborted) {
         releaseRequestSlot(handle)
         return
@@ -193,8 +256,17 @@ Item {
           }
           if (xhr.status === 429) {
             restrictInFlight = true
+            backgroundRefusals += 1
+            rateLimitedSince = now()
+            cooldownProbeUsed = false
             rateLimitedUntil = Api.nextRateLimitedUntil(now(),
               Api.responseRetryAfter(xhr), rateLimitedUntil, job.rateLimitRetries)
+            console.warn("Spotify API rate limited on "
+              + String(job.method || "GET") + " " + Api.redact(String(job.path || ""))
+              + "; pausing every request for "
+              + Api.apiCooldownMs(now(), rateLimitedUntil) + " ms"
+              + " (retry " + job.rateLimitRetries
+              + ", background gap now " + backgroundSpacingMs + " ms)")
             if (job.retryRateLimit !== false
                 && Api.shouldRetryRateLimit(job.rateLimitRetries)) {
               job.rateLimitRetries += 1
@@ -290,6 +362,12 @@ Item {
       timeoutMs: Api.SEARCH_REQUEST_TIMEOUT_MS,
       retryRateLimit: false
     })
+  }
+
+  Timer {
+    id: backgroundPaceTimer
+    repeat: false
+    onTriggered: root.pumpRequests()
   }
 
   Timer {

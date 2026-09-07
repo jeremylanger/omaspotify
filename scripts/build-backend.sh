@@ -3,20 +3,20 @@ set -euo pipefail
 
 source_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 manifest="$source_root/backend/Cargo.toml"
-runtime_dir=${OMARCHY_SPOTIFY_RUNTIME_DIR:-"$HOME/.local/lib/omarchy-spotify"}
-destination="$runtime_dir/omarchy-spotify-backend"
+runtime_dir=${OMASPOTIFY_RUNTIME_DIR:-"$HOME/.local/lib/omaspotify"}
+destination="$runtime_dir/omaspotify-backend"
 source_id_file="$runtime_dir/backend-source.sha256"
 binary_hash_file="$runtime_dir/backend-binary.sha256"
 origin_file="$runtime_dir/backend-origin"
 architecture=$(uname -m)
-repository=stappmus/Omarchy-Spotify
+repository=jeremylanger/omaspotify
 workflow_identity="https://github.com/$repository/.github/workflows/release-backend.yml"
 
 # Build outside the plugin directory: Omarchy hot-reloads a plugin whenever any
 # file inside it changes, so an in-place backend/target/ makes its recursive
 # watcher unload and reload the plugin for every Cargo write, killing the build.
 cache_root=${XDG_CACHE_HOME:-"$HOME/.cache"}
-target_dir=${CARGO_TARGET_DIR:-"$cache_root/omarchy-spotify/target"}
+target_dir=${CARGO_TARGET_DIR:-"$cache_root/omaspotify/target"}
 temporary=""
 download_dir=""
 release_asset=""
@@ -36,7 +36,7 @@ trap cleanup EXIT
 write_atomic() {
   local destination_file=$1 value=$2
 
-  temporary=$(mktemp "$runtime_dir/.omarchy-spotify-metadata.XXXXXX")
+  temporary=$(mktemp "$runtime_dir/.omaspotify-metadata.XXXXXX")
   printf '%s\n' "$value" >"$temporary"
   chmod 600 "$temporary"
   mv -f -- "$temporary" "$destination_file"
@@ -47,7 +47,7 @@ install_backend() {
   local source=$1 origin=$2 binary_hash
 
   install -d -m 700 -- "$runtime_dir"
-  temporary=$(mktemp "$runtime_dir/.omarchy-spotify-backend.XXXXXX")
+  temporary=$(mktemp "$runtime_dir/.omaspotify-backend.XXXXXX")
   install -m 755 -- "$source" "$temporary"
   mv -f -- "$temporary" "$destination"
   temporary=""
@@ -82,11 +82,11 @@ download_verified_release() {
     backend rust-toolchain.toml || return 1
 
   case $architecture in
-    x86_64|aarch64) release_asset="omarchy-spotify-backend-$architecture" ;;
+    x86_64|aarch64) release_asset="omaspotify-backend-$architecture" ;;
     *) return 1 ;;
   esac
   release_base="https://github.com/$repository/releases/download/v$version"
-  download_dir=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-spotify-release.XXXXXX")
+  download_dir=$(mktemp -d "${TMPDIR:-/tmp}/omaspotify-release.XXXXXX")
 
   curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL --retry 2 \
     --connect-timeout 5 --max-time 60 --max-filesize 33554432 \
@@ -115,7 +115,7 @@ download_verified_release() {
   verified_release="$download_dir/$release_asset"
 }
 
-if [[ ${OMARCHY_SPOTIFY_BUILD_FROM_SOURCE:-0} != 1 ]]; then
+if [[ ${OMASPOTIFY_BUILD_FROM_SOURCE:-0} != 1 ]]; then
   if download_verified_release; then
     install_backend "$verified_release" "attested-release:$verified_commit"
     printf 'Installed verified playback backend: %s\n' "$destination"
@@ -137,5 +137,5 @@ source_date_epoch=$(git -C "$source_root" log -1 --format=%ct 2>/dev/null || pri
   CARGO_TARGET_DIR="$target_dir" \
     cargo build --locked --release --manifest-path "$manifest"
 )
-install_backend "$target_dir/release/omarchy-spotify-backend" "source-build:$source_id"
+install_backend "$target_dir/release/omaspotify-backend" "source-build:$source_id"
 printf 'Built and installed playback backend: %s\n' "$destination"

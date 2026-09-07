@@ -3,15 +3,13 @@ set -euo pipefail
 
 source_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 section=left
-setup_args=()
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-local.sh [--section left|center|right] [--install-spotifyd]
+Usage: scripts/install-local.sh [--section left|center|right]
 
 Validate this checkout, link it into Omarchy's user-plugin directory, install
 the plugin playback backend, and enable the widget through Omarchy's command.
---install-spotifyd also keeps the distro daemon as a fallback.
 EOF
 }
 
@@ -21,10 +19,6 @@ while (( $# > 0 )); do
       [[ $# -ge 2 ]] || { echo "install-local.sh: --section requires a value" >&2; exit 2; }
       section=$2
       shift 2
-      ;;
-    --install-spotifyd)
-      setup_args+=(--install-spotifyd)
-      shift
       ;;
     -h|--help)
       usage
@@ -49,10 +43,10 @@ command -v omarchy >/dev/null 2>&1 || {
 }
 
 omarchy plugin validate "$source_root"
-"$source_root/scripts/setup.sh" "${setup_args[@]}"
+"$source_root/scripts/setup.sh"
 
 plugins_root="${XDG_CONFIG_HOME:-"$HOME/.config"}/omarchy/plugins"
-target="$plugins_root/quickshell.spotify"
+target="$plugins_root/io.github.jeremylanger.omaspotify"
 install -d -m 700 -- "$plugins_root"
 
 if [[ -L $target && $(readlink -f -- "$target") == "$source_root" ]]; then
@@ -68,17 +62,17 @@ fi
 omarchy-shell shell rescanPlugins >/dev/null
 discovered=0
 for (( attempt = 0; attempt < 40; attempt++ )); do
-  if omarchy plugin list --json | jq -e 'any(.[]; .id == "quickshell.spotify")' >/dev/null; then
+  if omarchy plugin list --json | jq -e 'any(.[]; .id == "io.github.jeremylanger.omaspotify")' >/dev/null; then
     discovered=1
     break
   fi
   sleep 0.05
 done
 (( discovered )) || {
-  echo "install-local.sh: Omarchy did not discover quickshell.spotify" >&2
+  echo "install-local.sh: Omarchy did not discover io.github.jeremylanger.omaspotify" >&2
   exit 1
 }
 
-omarchy plugin enable quickshell.spotify --section "$section"
+omarchy plugin enable io.github.jeremylanger.omaspotify --section "$section"
 echo "Installed. Click the Spotify bar widget; if you are logged out,"
 echo "the client opens directly on its guided Spotify login screen."

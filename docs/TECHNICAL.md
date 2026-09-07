@@ -5,7 +5,7 @@ details out of the user-facing README.
 
 ## Architecture
 
-Omarchy Spotify runs as a plugin inside Omarchy's existing `omarchy-shell`
+OmaSpotify runs as a plugin inside Omarchy's existing `omarchy-shell`
 Quickshell process. It provides a shared service, a bar widget, and a lazy-loaded
 panel. There is no embedded website, browser engine, second shell process, or
 resident helper process.
@@ -18,7 +18,7 @@ rate while that device is playing. Fast `/me/player` polling is reserved for
 remote or unknown targets. Spotify data and other user actions also use the
 Web API.
 
-Local audio runs in the plugin-owned `omarchy-spotify-backend` Rust process,
+Local audio runs in the plugin-owned `omaspotify-backend` Rust process,
 supervised by a static systemd user unit that is never enabled at login. The
 backend embeds a commit-pinned librespot revision rather than duplicating its
 private-protocol implementation. It owns configuration, cache/authentication,
@@ -26,8 +26,7 @@ MPRIS, lifecycle, and a stable private Unix-socket boundary. The app starts the
 unit whenever its full player or mini-player is open, when you play on this
 computer, or when you choose it in Devices. Once every player surface closes,
 it stops after the configured idle period; 0 keeps it available indefinitely.
-The distro `spotifyd` unit is retained as a non-running fallback; the two units
-conflict so they cannot claim the same Connect identity together.
+This backend is the only playback engine; there is no second daemon.
 
 The unit sets `PULSE_LATENCY_MSEC=30` only for local playback and caps
 librespot's private player runtime at two Tokio workers. The backend's own
@@ -58,12 +57,27 @@ always the one that lands. The optimistic slider value is held until the player
 reports it, and playback state is refetched once the drag settles rather than
 after every command.
 
+Web API requests go through one queue with four running at a time. Each request
+carries a priority: a button you pressed first, then a page you opened, then
+ordinary work, then background work such as the library crawl. Background work
+is capped at two of the four slots, spaced apart, and stands aside for three
+seconds after anything you open, so a page you are waiting on is never behind
+the crawl.
+
+The rate limit belongs to the client ID, which we share with every other app
+built on it, so a refusal can arrive without us having sent much at all. On a
+429 the app honours `Retry-After` for everything, and the gap between background
+requests doubles and stays wide for the rest of the run. One page you are
+waiting on may try once during a cooldown, in case the refusal has slack in it;
+after being refused itself it waits its turn. Every request logs where its time
+went — queueing, token refresh, or the network — which is what makes a slow call
+diagnosable at all. See `docs/LIBRARY-DATA.md` for the measurements.
+
 ## Runtime requirements
 
 - Omarchy 4 with the Quickshell shell enabled
 - Spotify Premium
-- the exact-commit attested plugin backend, a local source build, or `spotifyd`
-  0.4.2 or newer as fallback
+- the exact-commit attested plugin backend, or a local source build
 - Omarchy base tools: `secret-tool`, `openssl`, `socat`, `xdg-open`, `wl-copy`,
   `avahi-browse`, `systemctl`, and Python 3
 
@@ -83,13 +97,12 @@ same-release checksum alone is never accepted as provenance.
 
 If `gh` is unavailable or any download, checksum, identity, or attestation
 check fails, the artifact is not executed. Setup instead builds `Cargo.lock`
-from the reviewed source with the available Cargo when present, or offers the
-official Arch `spotifyd` package as the last-resort fallback. Configuration,
-verified downloads, local builds, and user units themselves need no privilege.
+from the reviewed source with the available Cargo. Configuration, verified
+downloads, local builds, and user units themselves need no privilege.
 
 Omarchy treats any write inside a plugin directory as a change to the plugin and
 hot-reloads it, so the backend is compiled to
-`$XDG_CACHE_HOME/omarchy-spotify/target` (override with `CARGO_TARGET_DIR`),
+`$XDG_CACHE_HOME/omaspotify/target` (override with `CARGO_TARGET_DIR`),
 never to the plugin directory itself. This keeps the recursive file watcher
 from reloading the plugin — and killing the build — mid-setup. A stale
 `backend/target/` left by an older build can be removed; the backend ignores it.
@@ -106,10 +119,10 @@ streaming-only PKCE grant on port `8990`.
 No client secret or Spotify password enters the plugin. OAuth refresh tokens
 are written to GNOME Keyring over stdin and separated by client identity.
 Reusable local-playback authorization is stored with owner-only permissions in
-`$XDG_STATE_HOME/omarchy-spotify`; older credentials under `$XDG_CACHE_HOME`
+`$XDG_STATE_HOME/omaspotify`; older credentials under `$XDG_CACHE_HOME`
 are accepted once and migrated so clearing disposable caches cannot deauthorize
 this computer. Player restore state (last tab, filters, search history, and
-similar) is written to `$XDG_STATE_HOME/omarchy-spotify/session.json` so it
+similar) is written to `$XDG_STATE_HOME/omaspotify/session.json` so it
 does not pollute Omarchy's `shell.json`. Older copies kept as plugin settings
 are read once and removed from `shell.json` after that file is written.
 Short-lived access tokens and PKCE values remain in the shell process. OAuth
@@ -188,7 +201,7 @@ From a checkout on Omarchy 4:
 
 The command validates the manifest, installs the user-level playback files,
 links the checkout at
-`~/.config/omarchy/plugins/quickshell.spotify`, and enables the bar widget. It
+`~/.config/omarchy/plugins/io.github.jeremylanger.omaspotify`, and enables the bar widget. It
 refuses to replace an existing plugin.
 
 To install only the playback integration:
@@ -197,8 +210,7 @@ To install only the playback integration:
 ./scripts/setup.sh
 ```
 
-Neither path enables or starts a playback unit at login. Pass
-`--install-spotifyd` only when a distro fallback is also wanted.
+Neither path enables or starts the playback unit at login.
 
 ## Verification
 
@@ -223,25 +235,17 @@ See [Benchmark](BENCHMARK.md) for methodology and recorded results.
 Run the bundled uninstaller from outside the plugin directory:
 
 ```bash
-cd "$HOME" && "$HOME/.config/omarchy/plugins/quickshell.spotify/scripts/uninstall.sh"
+cd "$HOME" && "$HOME/.config/omarchy/plugins/io.github.jeremylanger.omaspotify/scripts/uninstall.sh"
 ```
 
 This removes the plugin and all plugin-owned services, binaries, config, state,
 caches, sockets, backups, and keyring entries. See the README's
 **Remove it completely** section for the equivalent commands and legacy
-keybinding check. The `spotifyd` package remains installed because another
-client may use it.
-
-Remove that package separately only when it was installed solely for this app:
-
-```bash
-omarchy pkg drop spotifyd
-```
+keybinding check.
 
 ## Upstream projects
 
 - [Omarchy](https://github.com/basecamp/omarchy)
-- [spotifyd](https://github.com/Spotifyd/spotifyd)
 - [librespot](https://github.com/librespot-org/librespot)
 - [spotify-player](https://github.com/aome510/spotify-player)
 - [ncspot](https://github.com/hrkfdn/ncspot)

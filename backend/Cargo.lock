@@ -1781,7 +1781,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omarchy-spotify-backend"
+name = "omaspotify-backend"
 version = "0.1.1"
 dependencies = [
  "anyhow",

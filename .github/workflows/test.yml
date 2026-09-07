@@ -1,0 +1,76 @@
+name: Test
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Rust backend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes libpulse-dev libssl-dev pkg-config
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path backend/Cargo.toml --all -- --check
+
+      - name: Test
+        run: cargo test --manifest-path backend/Cargo.toml --quiet
+
+      - name: Lint
+        run: cargo clippy --manifest-path backend/Cargo.toml --all-targets -- -D warnings
+
+  qml:
+    name: QML and scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Qt 6 test tools and the commands setup.sh requires
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            qt6-declarative-dev-tools qml6-module-qtquick qml6-module-qttest \
+            qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-window qml6-module-qtqml-workerscript \
+            qml6-module-qtquick-templates \
+            socat xdg-utils avahi-utils
+
+      - name: Run QML tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests -import "$PWD" -o -,txt
+
+      - name: Run helper tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 tests/test_connect_helper.py
+
+      - name: Check the panel and page boundary
+        run: PYTHONDONTWRITEBYTECODE=1 python3 tests/test_page_interface.py
+
+      - name: Run script tests
+        run: ./tests/test-scripts.sh
+
+      - name: Reject heavyweight runtime dependencies
+        run: |
+          if grep -rn 'QtWebEngine\|WebEngineView\|WebView\|playerctl\|node_modules' \
+            --include='*.qml' --include='*.js' --include='*.sh' --include='*.service' \
+            --exclude=test.sh .; then
+            echo "forbidden heavyweight runtime dependency found" >&2
+            exit 1
+          fi

@@ -8,6 +8,7 @@ BorderSurface {
   id: root
 
   required property var itemData
+  property var service: null
   property color foreground: Color.foreground
   property color accent: Color.accent
   property color muted: Color.muted
@@ -25,7 +26,7 @@ BorderSurface {
   property bool hovered: hoverHandler.hovered
   property bool actionsExpanded: false
 
-  readonly property bool durationActionVisible: itemData
+  readonly property bool durationColumnVisible: itemData
     && itemData.kind === "item" && Number(itemData.durationMs) > 0
   readonly property bool saveActionVisible: showSave && !saved && itemData
     && !!itemData.uri && itemData.type !== "chapter"
@@ -35,19 +36,18 @@ BorderSurface {
     && ["track", "episode"].indexOf(itemData.type) >= 0
   readonly property bool playActionVisible: showPlay && itemData
     && ["show", "audiobook"].indexOf(itemData.type) < 0
-  readonly property int fullActionCount: (durationActionVisible ? 1 : 0)
-    + (saveActionVisible ? 1 : 0) + (playlistActionVisible ? 1 : 0)
+  readonly property int fullActionCount: (saveActionVisible ? 1 : 0)
+    + (playlistActionVisible ? 1 : 0)
     + (queueActionVisible ? 1 : 0) + (playActionVisible ? 1 : 0)
   readonly property real fullActionWidth:
-    (durationActionVisible ? durationLabel.implicitWidth : 0)
-    + (saveActionVisible ? saveButton.implicitWidth : 0)
+    (saveActionVisible ? saveButton.implicitWidth : 0)
     + (playlistActionVisible ? playlistButton.implicitWidth : 0)
     + (queueActionVisible ? queueButton.implicitWidth : 0)
     + (playActionVisible ? playButton.implicitWidth : 0)
     + Math.max(0, fullActionCount - 1) * Style.space(2)
   readonly property real titleWidthWithFullActions: Math.max(0,
-    contentRow.width - artworkSurface.width - fullActionWidth
-      - contentRow.spacing * 2)
+    contentRow.width - artworkSurface.width - durationColumn.width
+      - fullActionWidth - contentRow.spacing * 3)
   readonly property bool compactActions: Api.mediaRowShouldCompact(
     titleMetrics.advanceWidth, titleWidthWithFullActions, fullActionCount)
 
@@ -76,7 +76,7 @@ BorderSurface {
 
   width: parent ? parent.width : implicitWidth
   implicitWidth: Style.space(420)
-  implicitHeight: Style.space(66)
+  implicitHeight: Style.space(46)
   height: implicitHeight
   radius: Style.cornerRadius
   color: selected || reorderDragging
@@ -171,8 +171,9 @@ BorderSurface {
 
     BorderSurface {
       id: artworkSurface
-      width: parent.height
+      width: Style.space(32)
       height: width
+      anchors.verticalCenter: parent.verticalCenter
       radius: Style.spacing.labelGap
       color: Style.normalFillFor(root.foreground, root.accent)
       borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
@@ -181,15 +182,17 @@ BorderSurface {
         id: rowArtwork
         anchors.fill: parent
         anchors.margins: Style.space(2)
-        source: root.itemData && root.itemData.imageUrl ? root.itemData.imageUrl : ""
+        source: root.itemData && root.itemData.imageUrl
+          ? (root.service ? root.service.artworkFor(root.itemData.imageUrl)
+            : root.itemData.imageUrl) : ""
         sourceSize.width: 112
         sourceSize.height: 112
         fillMode: Image.PreserveAspectFit
         asynchronous: true
+        cache: false
         // List delegates are recycled; do not retain every scrolled artwork
         // pixmap in the process. The current-track artwork is the only image
         // intentionally kept in Qt's shared cache.
-        cache: false
         visible: status === Image.Ready
       }
 
@@ -209,8 +212,8 @@ BorderSurface {
     }
 
     Column {
-      width: Math.max(20, parent.width - artworkSurface.width - actionRow.width
-        - parent.spacing * 2)
+      width: Math.max(20, parent.width - artworkSurface.width
+        - durationColumn.width - actionRow.width - parent.spacing * 3)
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(3)
 
@@ -241,22 +244,31 @@ BorderSurface {
       }
     }
 
+    // Measured separately, because sizing a Text from its own implicitWidth
+    // makes the layout chase itself.
+    TextMetrics {
+      id: durationMetrics
+      font: durationColumn.font
+      text: durationColumn.text
+    }
+
+    Text {
+      id: durationColumn
+      objectName: "media-row-duration"
+      visible: root.durationColumnVisible
+      width: visible ? Math.max(Style.space(30), durationMetrics.width) : 0
+      anchors.verticalCenter: parent.verticalCenter
+      horizontalAlignment: Text.AlignRight
+      text: Api.millisecondsToClock(root.itemData ? root.itemData.durationMs : 0)
+      color: root.muted
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+
     Row {
       id: actionRow
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(2)
-
-      Text {
-        id: durationLabel
-        objectName: "media-row-duration"
-        visible: root.durationActionVisible
-          && (!root.compactActions || root.actionsExpanded)
-        anchors.verticalCenter: parent.verticalCenter
-        text: Api.millisecondsToClock(root.itemData ? root.itemData.durationMs : 0)
-        color: root.muted
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
 
       Button {
         id: saveButton

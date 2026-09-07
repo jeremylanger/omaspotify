@@ -1,15 +1,14 @@
 [Unit]
-Description=Omarchy Spotify plugin playback backend
-Documentation=https://github.com/stappmus/QuickshellSpotify
+Description=OmaSpotify plugin playback backend
+Documentation=https://github.com/jeremylanger/omaspotify
 After=graphical-session.target sound.target
 Wants=sound.target
-Conflicts=omarchy-spotifyd.service
 
 [Service]
 Type=simple
 Environment=PULSE_LATENCY_MSEC=30
 Environment=TOKIO_WORKER_THREADS=2
-ExecStart=%h/.local/lib/omarchy-spotify/omarchy-spotify-backend --config-path=%h/.config/omarchy-spotify/spotifyd.conf
+ExecStart=@BACKEND_BINARY@ --config-path=@CONFIG_FILE@
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=5

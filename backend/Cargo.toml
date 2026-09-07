@@ -1,10 +1,10 @@
 [package]
-name = "omarchy-spotify-backend"
+name = "omaspotify-backend"
 version = "0.1.1"
 edition = "2024"
 rust-version = "1.87"
 license = "MIT"
-description = "Plugin-owned Spotify Connect playback backend for QuickshellSpotify"
+description = "Plugin-owned Spotify Connect playback backend for OmaSpotify"
 
 [dependencies]
 anyhow = "1.0"

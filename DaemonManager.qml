@@ -4,9 +4,9 @@ import Quickshell.Io
 
 import "Api.js" as Api
 
-// Owns only short-lived runtime/authentication commands. The plugin backend
-// (or its spotifyd fallback) is supervised by a user unit and is never launched
-// as an untracked child of the shell.
+// Owns only short-lived runtime/authentication commands. The plugin backend is
+// supervised by a user unit and is never launched as an untracked child of the
+// shell.
 Item {
   id: root
 
@@ -15,9 +15,11 @@ Item {
   height: 0
 
   property string pluginDir: ""
-  property string deviceName: "Omarchy Spotify"
+  property string deviceName: "OmaSpotify"
   property int bitrateKbps: 320
-  property string unitName: "omarchy-spotify.service"
+  property bool normalizeVolume: true
+  property int normalizationPregainDb: 0
+  property string unitName: "omaspotify.service"
   property bool authenticationCancelled: false
   property bool mprisPresent: false
 
@@ -25,7 +27,6 @@ Item {
   property bool binaryChecked: false
   property bool unitAvailable: false
   property bool unitChecked: false
-  property bool usingFallbackRuntime: false
   property bool automaticSetupAttempted: false
   property bool credentialsAvailable: false
   property bool credentialsChecked: false
@@ -84,7 +85,7 @@ Item {
   function installPlaybackBackendIfNeeded() {
     if (automaticSetupAttempted || setupBusy || !pluginDir
         || !requirementsChecked) return
-    if (playbackReady && !usingFallbackRuntime) return
+    if (playbackReady) return
     automaticSetupAttempted = true
     setupPlayback()
   }
@@ -151,8 +152,10 @@ Item {
     // The blank third line explicitly clears any legacy per-app sink choice.
     // Omarchy's Audio panel remains the sole owner of desktop audio routing.
     configurationInput = String(deviceName) + "\n" + String(bitrateKbps) + "\n"
+      + (normalizeVolume ? "true" : "false") + "\n"
+      + String(normalizationPregainDb) + "\n"
     configurationBusy = true
-    configWriter.command = [pluginDir + "/scripts/configure-spotifyd.sh"]
+    configWriter.command = [pluginDir + "/scripts/configure-playback.sh"]
     configWriter.running = true
   }
 
@@ -190,7 +193,7 @@ Item {
       busy = false
       return
     }
-    authCommand.command = [pluginDir + "/scripts/spotifyd-auth.sh"]
+    authCommand.command = [pluginDir + "/scripts/playback-auth.sh"]
     authCommand.running = true
   }
 
@@ -215,7 +218,7 @@ Item {
     credentialsClearBusy = true
     busy = true
     lastError = ""
-    clearCredentialsCommand.command = [pluginDir + "/scripts/spotifyd-logout.sh"]
+    clearCredentialsCommand.command = [pluginDir + "/scripts/playback-logout.sh"]
     clearCredentialsCommand.running = true
   }
 
@@ -226,6 +229,8 @@ Item {
 
   onDeviceNameChanged: requestConfiguration()
   onBitrateKbpsChanged: requestConfiguration()
+  onNormalizeVolumeChanged: requestConfiguration()
+  onNormalizationPregainDbChanged: requestConfiguration()
   onPluginDirChanged: {
     if (!pluginDir) return
     checkRequirements()
@@ -287,8 +292,6 @@ Item {
       root.unitAvailable = exitCode === 0
       root.unitChecked = true
       if (unit) root.unitName = unit
-      root.usingFallbackRuntime = exitCode === 0
-        && unit === "omarchy-spotifyd.service"
       if (exitCode === 0) root.requestConfiguration()
       root.installPlaybackBackendIfNeeded()
     }

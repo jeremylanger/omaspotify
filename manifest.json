@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "quickshell.spotify",
-  "name": "Omarchy Spotify",
-  "version": "1.0.3",
-  "author": "QuickshellSpotify",
+  "id": "io.github.jeremylanger.omaspotify",
+  "name": "OmaSpotify",
+  "version": "2.0.0",
+  "author": "jeremylanger",
   "license": "MIT",
-  "description": "Spotify in Quickshell with all the features you need—using about 60 MB of memory versus roughly 950 MB for the official client.",
+  "description": "Spotify in Quickshell with all the features you need\u2014using about 60 MB of memory versus roughly 950 MB for the official client.",
   "kinds": [
     "service",
     "bar-widget",
@@ -18,8 +18,8 @@
     "panel": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Omarchy Spotify",
-    "description": "Spotify in Quickshell with all the features you need—using about 60 MB of memory versus roughly 950 MB for the official client.",
+    "displayName": "OmaSpotify",
+    "description": "Spotify in Quickshell with all the features you need\u2014using about 60 MB of memory versus roughly 950 MB for the official client.",
     "category": "Media",
     "aliases": [
       "spotify",
@@ -29,7 +29,7 @@
     "allowMultiple": false,
     "defaultSection": "left",
     "defaults": {
-      "deviceName": "Omarchy Spotify",
+      "deviceName": "OmaSpotify",
       "idleShutdownMinutes": 15,
       "showMiniPlayer": "On",
       "shortcutPlayer": "Omarchy Music app",
@@ -40,14 +40,16 @@
       "scrollBarText": "Off",
       "scrollSpeed": "1",
       "maxBarTextWidth": "240",
-      "audioQuality": "320 kbps"
+      "audioQuality": "320 kbps",
+      "normalizeVolume": "On",
+      "volumeLevel": "Normal"
     },
     "schema": [
       {
         "key": "deviceName",
         "type": "string",
         "label": "This computer appears as",
-        "defaultValue": "Omarchy Spotify",
+        "defaultValue": "OmaSpotify",
         "description": "Shown in Devices immediately. Spotify Connect uses the new name the next time local playback starts."
       },
       {
@@ -162,6 +164,29 @@
         ],
         "defaultValue": "320 kbps",
         "description": "Takes effect the next time playback starts."
+      },
+      {
+        "key": "normalizeVolume",
+        "type": "enum",
+        "label": "Normalize volume",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "On",
+        "description": "Play quiet and loud tracks at a similar level, so you do not reach for the volume between songs."
+      },
+      {
+        "key": "volumeLevel",
+        "type": "enum",
+        "label": "Volume level",
+        "options": [
+          "Loud",
+          "Normal",
+          "Quiet"
+        ],
+        "defaultValue": "Normal",
+        "description": "How loud normalized playback aims to be. Takes effect the next time playback starts."
       }
     ]
   }

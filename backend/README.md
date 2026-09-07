@@ -1,4 +1,4 @@
-# Omarchy Spotify backend
+# OmaSpotify backend
 
 This crate owns the plugin's local Spotify Connect runtime. It deliberately
 does not reimplement Spotify's private wire protocol: it embeds a commit-pinned
@@ -57,18 +57,17 @@ Build and verify from the repository root:
 cargo fmt --manifest-path backend/Cargo.toml --all -- --check
 cargo test --manifest-path backend/Cargo.toml --locked
 cargo clippy --manifest-path backend/Cargo.toml --locked --all-targets -- -D warnings
-OMARCHY_SPOTIFY_BUILD_FROM_SOURCE=1 ./scripts/build-backend.sh
+OMASPOTIFY_BUILD_FROM_SOURCE=1 ./scripts/build-backend.sh
 ```
 
 By default, `scripts/build-backend.sh` first tries the exact-commit attested
-release. `OMARCHY_SPOTIFY_BUILD_FROM_SOURCE=1` forces an auditable local build
-into `$XDG_CACHE_HOME/omarchy-spotify/target` (override with
+release. `OMASPOTIFY_BUILD_FROM_SOURCE=1` forces an auditable local build
+into `$XDG_CACHE_HOME/omaspotify/target` (override with
 `CARGO_TARGET_DIR`). Omarchy hot-reloads plugins on any write inside their
 directory, so building to a cache path outside the plugin prevents the shell's
 recursive watcher from reloading the plugin and killing the build.
 
 See [the protocol reference](../docs/BACKEND_PROTOCOL.md) for the compatibility
 contract and [release process](../docs/RELEASING.md) for the artifact-provenance
-requirements. The legacy `omarchy-spotifyd.service` remains installable as a
-fallback and conflicts with the primary unit so two local receivers cannot run
+requirements. It is the only playback unit, so a single local receiver runs
 accidentally with the same device identity.

@@ -10,10 +10,10 @@ import "Api.js" as Api
 BarWidget {
   id: root
 
-  moduleName: "quickshell.spotify"
+  moduleName: "io.github.jeremylanger.omaspotify"
 
   readonly property var spotify: bar && bar.shell
-    ? bar.shell.serviceFor("quickshell.spotify") : null
+    ? bar.shell.serviceFor("io.github.jeremylanger.omaspotify") : null
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color muted: Color.muted
   readonly property string surfaceKey: "spotify-popup-" + String(root)
@@ -112,12 +112,7 @@ BarWidget {
   }
 
   function applySequenceModifiers(sequence) {
-    var parsed = Api.parseShortcutSequence(sequence)
-    var flags = 0
-    if (parsed.ctrl) flags |= Qt.ControlModifier
-    if (parsed.shift) flags |= Qt.ShiftModifier
-    if (parsed.alt) flags |= Qt.AltModifier
-    heldModifierFlags = flags
+    heldModifierFlags = shortcutModifiers.flagsForSequence(sequence)
   }
 
   function latchShortcutMode(sequence) {
@@ -138,26 +133,15 @@ BarWidget {
 
   function noteHeldModifiers(event, pressed) {
     if (!event) return
-    heldModifierFlags = Api.shortcutModifierFlagsAfterEvent(event.modifiers,
-      pressed, heldModifierFlags, hintModifierFlag(event.key))
+    heldModifierFlags = shortcutModifiers.flagsAfterEvent(event.modifiers,
+      pressed, heldModifierFlags, event.key)
   }
 
-  function isModifierKey(key) {
-    return key === Qt.Key_Control || key === Qt.Key_Shift
-      || key === Qt.Key_Alt || key === Qt.Key_AltGr || key === Qt.Key_Meta
-  }
 
-  function isHintModifierKey(key) {
-    return key === Qt.Key_Control || key === Qt.Key_Shift
-      || key === Qt.Key_Alt || key === Qt.Key_AltGr
-  }
 
-  function hintModifierFlag(key) {
-    if (key === Qt.Key_Control) return Qt.ControlModifier
-    if (key === Qt.Key_Shift) return Qt.ShiftModifier
-    if (key === Qt.Key_Alt || key === Qt.Key_AltGr) return Qt.AltModifier
-    return 0
-  }
+
+
+
 
   function acceptMiniKey(event) {
     latchShortcutMode()
@@ -244,14 +228,18 @@ BarWidget {
       // Remap an existing full player onto the workspace containing this bar.
       // Splitting hide and summon across event-loop turns lets Wayland finish
       // unmapping the old surface before the shell opens it here.
-      bar.shell.hide("quickshell.spotify")
+      bar.shell.hide("io.github.jeremylanger.omaspotify")
       Qt.callLater(function() {
         if (root.bar && root.bar.shell)
-          root.bar.shell.summon("quickshell.spotify", encoded)
+          root.bar.shell.summon("io.github.jeremylanger.omaspotify", encoded)
       })
     } else if (payload && typeof bar.shell.summon === "function")
-      bar.shell.summon("quickshell.spotify", encoded)
-    else bar.shell.toggle("quickshell.spotify", encoded)
+      bar.shell.summon("io.github.jeremylanger.omaspotify", encoded)
+    else bar.shell.toggle("io.github.jeremylanger.omaspotify", encoded)
+  }
+
+  ShortcutModifiers {
+    id: shortcutModifiers
   }
 
   IpcHandler {
@@ -416,8 +404,8 @@ BarWidget {
 
   function handleMiniKey(event) {
     root.noteHeldModifiers(event, true)
-    if (root.isModifierKey(event.key)) {
-      if (root.isHintModifierKey(event.key)) root.latchShortcutMode()
+    if (shortcutModifiers.isModifierKey(event.key)) {
+      if (shortcutModifiers.isHintModifierKey(event.key)) root.latchShortcutMode()
       event.accepted = true
       return
     }
@@ -567,7 +555,7 @@ BarWidget {
     tooltipText: root.spotify && root.spotify.hasMedia
       ? root.spotify.title + (root.spotify.artist ? " — " + root.spotify.artist : "")
       : (root.spotify && !root.spotify.accountConnected
-        ? "Set up Omarchy Spotify" : "Omarchy Spotify")
+        ? "Set up OmaSpotify" : "OmaSpotify")
     // Size from the painted glyph and label plus the real inner chrome.
     readonly property real fittedWidth: Math.ceil(barGlyph.width
       + barContent.spacing + barLabel.implicitWidth + scaledHorizontalMargin * 2)
@@ -717,7 +705,7 @@ BarWidget {
         root.shortcutModeLatched = false
       }
       Keys.onShortcutOverride: function(event) {
-        if (root.isHintModifierKey(event.key)) {
+        if (shortcutModifiers.isHintModifierKey(event.key)) {
           root.noteHeldModifiers(event, true)
           root.latchShortcutMode()
           event.accepted = true
@@ -726,7 +714,7 @@ BarWidget {
       Keys.onPressed: function(event) { root.handleMiniKey(event) }
       Keys.onReleased: function(event) {
         root.noteHeldModifiers(event, false)
-        if (root.isHintModifierKey(event.key)) event.accepted = true
+        if (shortcutModifiers.isHintModifierKey(event.key)) event.accepted = true
       }
 
       Shortcut {

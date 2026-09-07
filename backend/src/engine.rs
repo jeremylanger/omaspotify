@@ -77,6 +77,8 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
     let mut player_config = PlayerConfig {
         bitrate: config.bitrate,
         position_update_interval: Some(Duration::from_secs(1)),
+        normalisation: config.normalisation,
+        normalisation_pregain_db: config.normalisation_pregain_db,
         ..PlayerConfig::default()
     };
     player_config.gapless = true;
@@ -611,7 +613,7 @@ pub async fn authenticate(config: &BackendConfig, oauth_port: u16) -> Result<()>
         OAUTH_SCOPES.to_vec(),
     )
     .with_custom_message(
-        "<h3 style=\"color: darkgreen\">Authentication successful. You can return to Omarchy Spotify.</h3>",
+        "<h3 style=\"color: darkgreen\">Authentication successful. You can return to OmaSpotify.</h3>",
     )
     .open_in_browser()
     .build()

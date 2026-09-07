@@ -34,7 +34,7 @@ close_playback_callback_tab() {
 
 return_to_spotify() {
   command -v omarchy-shell >/dev/null 2>&1 || return 0
-  omarchy-shell -q shell summon quickshell.spotify '{"tab":"search"}' \
+  omarchy-shell -q shell summon io.github.jeremylanger.omaspotify '{"tab":"search"}' \
     >/dev/null 2>&1 || true
 
   command -v hyprctl >/dev/null 2>&1 || return 0
@@ -46,7 +46,7 @@ return_to_spotify() {
       hyprctl clients -j 2>/dev/null | jq -r '
         [.[]
           | select((.class // "") == "org.quickshell"
-            and (.title // "") == "Omarchy Spotify")
+            and (.title // "") == "OmaSpotify")
           | .address][0] // empty
       '
     )

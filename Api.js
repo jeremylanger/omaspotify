@@ -32,11 +32,11 @@ var DISCOVERY_SEARCHES = [
   "Fresh Finds"
 ]
 
-// spotifyd's software mixer maps its normalized volume over a 60 dB
-// logarithmic range. Convert that control to a cubic slider over the same
-// range, matching the gentler taper used by common desktop audio mixers.
+// The playback engine's software mixer spreads its volume over a 60 dB
+// logarithmic range. Convert that to a cubic slider over the same range,
+// matching the gentler taper used by common desktop audio mixers.
 // Zero remains a true mute in both directions.
-var SPOTIFYD_CUBIC_FLOOR = 0.1
+var ENGINE_CUBIC_FLOOR = 0.1
 
 function clampUnit(value) {
   return Math.max(0, Math.min(1, Number(value) || 0))
@@ -48,19 +48,19 @@ function normalizeVolumePercent(value) {
   return isFinite(volume) ? Math.max(0, Math.min(100, volume)) : null
 }
 
-function spotifydVolumeToSlider(value) {
+function engineVolumeToSlider(value) {
   var volume = clampUnit(value)
   if (volume <= 0) return 0
   var cubicRoot = Math.pow(10, volume - 1)
-  return clampUnit((cubicRoot - SPOTIFYD_CUBIC_FLOOR)
-    / (1 - SPOTIFYD_CUBIC_FLOOR))
+  return clampUnit((cubicRoot - ENGINE_CUBIC_FLOOR)
+    / (1 - ENGINE_CUBIC_FLOOR))
 }
 
-function sliderToSpotifydVolume(value) {
+function sliderToEngineVolume(value) {
   var slider = clampUnit(value)
   if (slider <= 0) return 0
-  var cubicRoot = SPOTIFYD_CUBIC_FLOOR
-    + (1 - SPOTIFYD_CUBIC_FLOOR) * slider
+  var cubicRoot = ENGINE_CUBIC_FLOOR
+    + (1 - ENGINE_CUBIC_FLOOR) * slider
   return clampUnit(1 + Math.log(cubicRoot) / Math.LN10)
 }
 
@@ -253,7 +253,7 @@ function rateLimitMessage(retryAfter) {
     : "Spotify is busy. Try again in a moment."
 }
 
-var API_MAX_IN_FLIGHT = 2
+var API_MAX_IN_FLIGHT = 4
 var API_MAX_RATE_LIMIT_RETRIES = 4
 
 function rateLimitRetryMs(retryAfter, attempt) {
@@ -291,7 +291,10 @@ function apiRequestIsMutating(method) {
 function apiJobPriority(job) {
   if (!job) return 0
   if (apiRequestIsMutating(job.method)) return 2
-  return String(job.priority || "") === "interactive" ? 1 : 0
+  var priority = String(job.priority || "")
+  if (priority === "interactive") return 1
+  // Library crawling waits behind anything the person actually asked for.
+  return priority === "background" ? -1 : 0
 }
 
 function enqueueApiJob(queue, job) {
@@ -304,19 +307,88 @@ function enqueueApiJob(queue, job) {
   return next
 }
 
-function dequeueApiJob(queue) {
-  var next = arrayValues(queue)
+// Background work never takes the last slots, so a page you open has somewhere
+// to run even while the library is loading.
+// Background dispatches are spaced apart. A burst of them is what trips
+// Spotify's limit on a cold start.
+var API_BACKGROUND_SPACING_MS = 500
+var API_BACKGROUND_SPACING_MAX_MS = 8000
+
+// We share a client ID with every other app built on it, so the leftover
+// budget is unknowable. A refusal stops every request for about twenty
+// seconds, so the gap doubles each time and never narrows again this run.
+function backgroundSpacingForRefusals(refusals) {
+  var count = Math.max(0, Math.floor(Number(refusals) || 0))
+  if (count > 8) count = 8
+  return Math.min(API_BACKGROUND_SPACING_MAX_MS,
+    API_BACKGROUND_SPACING_MS * Math.pow(2, count))
+}
+
+function backgroundStartDelay(lastStartedAt, nowMs, spacingMs) {
+  var last = Number(lastStartedAt) || 0
+  if (last <= 0) return 0
+  var gap = (Number(nowMs) || 0) - last
+  var spacing = Number(spacingMs) || 0
+  return gap >= spacing ? 0 : Math.ceil(spacing - gap)
+}
+
+// Background work also stands aside for a moment after anything the person
+// opened, so a click gets the whole of a budget it may be sharing.
+var API_BACKGROUND_YIELD_MS = 3000
+
+function backgroundDispatchDelay(lastBackgroundAt, lastInteractiveAt, nowMs, spacingMs) {
+  return Math.max(
+    backgroundStartDelay(lastBackgroundAt, nowMs, spacingMs),
+    backgroundStartDelay(lastInteractiveAt, nowMs, API_BACKGROUND_YIELD_MS))
+}
+
+function backgroundInFlightLimit(limit) {
+  var total = Math.max(1, Math.floor(Number(limit) || 1))
+  return Math.max(1, Math.min(2, total - 2))
+}
+
+function dequeueApiJob(queue, allowBackground) {
+  // Copy first: shifting the caller's own array is a nasty surprise.
+  var next = arrayValues(queue).slice()
+  var skipped = []
   while (next.length) {
     var job = next.shift()
     if (!job || (job.handle && job.handle.aborted === true)) continue
-    return { job: job, queue: next }
+    if (allowBackground === false && apiJobPriority(job) < 0) {
+      skipped.push(job)
+      continue
+    }
+    return { job: job, queue: skipped.concat(next) }
   }
-  return { job: null, queue: next }
+  return { job: null, queue: skipped }
 }
 
 function apiCooldownMs(now, until) {
   var wait = (Number(until) || 0) - (Number(now) || 0)
   return wait > 0 ? Math.ceil(wait) : 0
+}
+
+// A refusal usually comes from the shared budget rather than from us, so
+// waiting the whole of it out leaves an opened page blank for that long.
+// Whatever the person is watching pauses this much and then tries anyway.
+var API_FOREGROUND_COOLDOWN_CAP_MS = 1500
+
+// One early try per refusal, in case it has slack in it. Only for a page
+// someone is watching, only once however many are waiting, and never again for
+// a request that has already been refused itself.
+function jobMayRunDuringCooldown(job, probeUsed) {
+  if (!job || probeUsed === true) return false
+  return apiJobPriority(job) >= 1 && (Number(job.rateLimitRetries) || 0) === 0
+}
+
+function foregroundCooldownMs(nowMs, until, since, capMs) {
+  var wait = apiCooldownMs(nowMs, until)
+  if (wait <= 0) return 0
+  var cap = Number(capMs)
+  if (!isFinite(cap) || cap < 0) cap = API_FOREGROUND_COOLDOWN_CAP_MS
+  var waited = (Number(nowMs) || 0) - (Number(since) || 0)
+  var remaining = cap - waited
+  return remaining > 0 ? Math.ceil(Math.min(wait, remaining)) : 0
 }
 
 function nextRateLimitedUntil(now, retryAfter, currentUntil, attempt) {
@@ -396,6 +468,677 @@ function normalizedShortcutPlayer(value) {
   if (text === "Full player") return "Full player"
   if (text === "Mini player") return "Mini player"
   return "Omarchy Music app"
+}
+
+// Spotify's own loudness targets are -11, -14 and -19 LUFS. librespot
+// normalises to its own target, so a level is a pregain offset from Normal.
+var VOLUME_LEVEL_PREGAIN_DB = { Loud: 3, Normal: 0, Quiet: -5 }
+
+// How the library sidebar can be ordered. "library" is Spotify's own order,
+// which /me/playlists returns verbatim, so it is the default.
+var LIBRARY_SORT_MODES = ["library", "recent", "added", "alpha"]
+var LIBRARY_VIEW_MODES = ["compact-list", "list", "compact-grid", "grid"]
+
+// Rank contexts by the newest play seen for each. Spotify only returns the last
+// 50 plays, so this is a shallow window by design.
+// A played track dates its album and everyone on it, not just the playlist it
+// came from.
+function recentContextPlayTimes(payload) {
+  var items = payload && Array.isArray(payload.items) ? payload.items : []
+  var times = {}
+  for (var i = 0; i < items.length; i++) {
+    var row = items[i]
+    if (!row) continue
+    var at = Date.parse(String(row.played_at || ""))
+    if (!isFinite(at)) continue
+    var track = row.track || {}
+    var uris = artistUris(track)
+    if (row.context && row.context.uri) uris.push(String(row.context.uri))
+    if (track.album && track.album.uri) uris.push(String(track.album.uri))
+    for (var j = 0; j < uris.length; j++) {
+      var uri = uris[j]
+      if (!uri) continue
+      if (!times[uri] || at > times[uri]) times[uri] = at
+    }
+  }
+  return times
+}
+
+// Spotify caps recently-played at 50 plays, which is often only a day or two.
+// Top tracks and top artists cover roughly four weeks, so anything in them was
+// listened to inside that window. Date those at the far edge of the window: it
+// lifts them above older saves without pretending we know the exact moment.
+function recentListenWindow(topTracks, topArtists, nowMs, windowDays) {
+  var now = Number(nowMs) || 0
+  var days = Math.max(1, Number(windowDays) || 28)
+  var day = 24 * 3600 * 1000
+  // The rank says how much something was played, not when, so the whole range
+  // sits at least a week back: fresh saves and real plays still lead.
+  var newest = now - 7 * day
+  var oldest = now - days * day
+
+  var times = {}
+  function place(uri, rank, total) {
+    if (!uri) return
+    var span = Math.max(1, total - 1)
+    var at = newest - (newest - oldest) * (Math.min(rank, span) / span)
+    if (!times.hasOwnProperty(uri) || at > times[uri]) times[uri] = at
+  }
+
+  var tracks = topTracks && Array.isArray(topTracks.items) ? topTracks.items : []
+  for (var i = 0; i < tracks.length; i++) {
+    var album = tracks[i] && tracks[i].album
+    place(album ? String(album.uri || "") : "", i, tracks.length)
+  }
+  var artists = topArtists && Array.isArray(topArtists.items) ? topArtists.items : []
+  for (var j = 0; j < artists.length; j++) {
+    place(artists[j] ? String(artists[j].uri || "") : "", j, artists.length)
+  }
+  return times
+}
+
+// An exact play time always beats the window estimate.
+// Spotify only returns the last 50 plays and will not page back further, so we
+// keep our own record and fold each new batch into it. It deepens with use.
+function mergePlayHistory(stored, fresh) {
+  var out = {}
+
+  function take(source) {
+    if (!source || typeof source !== "object") return
+    for (var k in source) {
+      if (!source.hasOwnProperty(k)) continue
+      var at = playTimeOf(source[k])
+      if (!(at > 0)) continue
+      if (!out.hasOwnProperty(k) || at > out[k]) out[k] = at
+    }
+  }
+
+  take(stored)
+  take(fresh)
+  return out
+}
+
+// Records this big cost more to compare by stringifying than they cost to
+// build, and they are rebuilt on every page of the library crawl.
+function sameTimeMap(left, right) {
+  return sameKeys(left, right, function(a, b) { return a === b })
+}
+
+function sameTouchDates(left, right) {
+  return sameKeys(left, right, function(a, b) {
+    return playTimeOf(a) === playTimeOf(b) && playSourceOf(a) === playSourceOf(b)
+  })
+}
+
+function sameLikedIndex(left, right) {
+  return sameKeys(left, right, function(a, b) {
+    var one = Array.isArray(a) ? a : []
+    var two = Array.isArray(b) ? b : []
+    if (one.length !== two.length) return false
+    for (var i = 0; i < one.length; i++)
+      if (String(one[i]) !== String(two[i])) return false
+    return true
+  })
+}
+
+function sameKeys(left, right, equal) {
+  var a = left && typeof left === "object" ? left : ({})
+  var b = right && typeof right === "object" ? right : ({})
+  var count = 0
+  for (var k in a) {
+    if (!a.hasOwnProperty(k)) continue
+    if (!b.hasOwnProperty(k) || !equal(a[k], b[k])) return false
+    count++
+  }
+  for (var other in b) if (b.hasOwnProperty(other)) count--
+  return count === 0
+}
+
+// Spotify has no "my liked songs by this artist" endpoint, so the crawl that
+// already reads every liked song builds the index as it goes. Only ids are
+// kept; the tracks themselves are fetched when an artist page opens.
+function likedTrackIdsByArtist(payload) {
+  var rows = payload && Array.isArray(payload.items) ? payload.items : []
+  var out = {}
+  for (var i = 0; i < rows.length; i++) {
+    var track = rows[i] && rows[i].track ? rows[i].track : null
+    if (!track || !track.id) continue
+    var uris = artistUris(track)
+    for (var j = 0; j < uris.length; j++) {
+      if (!out.hasOwnProperty(uris[j])) out[uris[j]] = []
+      out[uris[j]].push(String(track.id))
+    }
+  }
+  return out
+}
+
+function mergeLikedIndex(stored, fresh, limit) {
+  var cap = Math.max(1, Number(limit) || 200)
+  var out = {}
+  var key
+
+  function take(source) {
+    if (!source || typeof source !== "object") return
+    for (var k in source) {
+      if (!source.hasOwnProperty(k)) continue
+      var ids = Array.isArray(source[k]) ? source[k] : []
+      if (!out.hasOwnProperty(k)) out[k] = []
+      for (var i = 0; i < ids.length; i++) {
+        var id = String(ids[i] || "")
+        if (id && out[k].indexOf(id) === -1) out[k].push(id)
+      }
+    }
+  }
+
+  take(stored)
+  take(fresh)
+  for (key in out) if (out.hasOwnProperty(key)) out[key] = out[key].slice(0, cap)
+  return out
+}
+
+function withoutLikedTrack(index, trackId) {
+  var id = String(trackId || "")
+  var out = {}
+  for (var k in index) {
+    if (!index.hasOwnProperty(k)) continue
+    var ids = Array.isArray(index[k]) ? index[k] : []
+    out[k] = ids.filter(function(value) { return String(value) !== id })
+  }
+  return out
+}
+
+function idBatches(ids, size) {
+  var list = Array.isArray(ids) ? ids : []
+  var step = Math.max(1, Number(size) || 50)
+  var out = []
+  for (var i = 0; i < list.length; i += step) out.push(list.slice(i, i + step))
+  return out
+}
+
+// Playlists and artists carry no date of their own. These work one out from the
+// rest of the library instead: a liked song, a saved album, a playlist edit.
+function collectTouchDates(items, source, urisOf) {
+  var rows = items && Array.isArray(items.items) ? items.items : []
+  var out = {}
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i]
+    if (!row) continue
+    var at = Date.parse(String(row.added_at || ""))
+    if (!isFinite(at) || !(at > 0)) continue
+    var uris = urisOf(row)
+    for (var j = 0; j < uris.length; j++) {
+      var uri = uris[j]
+      if (!uri) continue
+      if (!out.hasOwnProperty(uri) || at > out[uri].at)
+        out[uri] = { at: at, source: source }
+    }
+  }
+  return out
+}
+
+function artistUris(holder) {
+  var list = holder && Array.isArray(holder.artists) ? holder.artists : []
+  var out = []
+  for (var i = 0; i < list.length; i++)
+    if (list[i] && list[i].uri) out.push(String(list[i].uri))
+  return out
+}
+
+function touchDatesFromSavedTracks(payload) {
+  return collectTouchDates(payload, "liked", function(row) {
+    var track = row.track || {}
+    var uris = artistUris(track)
+    if (track.album && track.album.uri) uris.push(String(track.album.uri))
+    return uris
+  })
+}
+
+function touchDatesFromSavedAlbums(payload) {
+  return collectTouchDates(payload, "saved", function(row) {
+    return artistUris(row.album)
+  })
+}
+
+function mergeTouchDates(stored, fresh) {
+  var out = {}
+
+  function take(source) {
+    if (!source || typeof source !== "object") return
+    for (var k in source) {
+      if (!source.hasOwnProperty(k)) continue
+      var at = playTimeOf(source[k])
+      if (!(at > 0)) continue
+      if (!out.hasOwnProperty(k) || at > out[k].at)
+        out[k] = { at: at, source: playSourceOf(source[k]) }
+    }
+  }
+
+  take(stored)
+  take(fresh)
+  return out
+}
+
+// Only playlists you own: a stranger editing theirs is not you touching it.
+// Tracks come back in the order they were added, so the last one is the newest.
+function playlistEditRequest(playlist, userId, cached) {
+  if (!playlist || !playlist.id) return null
+  var owner = String(playlist.ownerId || "")
+  if (!owner || !userId || owner !== String(userId)) return null
+  var total = Number(playlist.total) || 0
+  if (!(total > 0)) return null
+  var seen = cached && cached[playlist.id]
+  if (seen && seen.snapshot && seen.snapshot === String(playlist.snapshotId || ""))
+    return null
+  return {
+    id: String(playlist.id),
+    uri: String(playlist.uri || ""),
+    snapshot: String(playlist.snapshotId || ""),
+    path: "/playlists/" + playlist.id + "/tracks",
+    query: { fields: "items(added_at)", limit: 1, offset: total - 1 }
+  }
+}
+
+function playlistEditDate(payload) {
+  var rows = payload && Array.isArray(payload.items) ? payload.items : []
+  if (rows.length === 0) return 0
+  var at = Date.parse(String(rows[0].added_at || ""))
+  return isFinite(at) && at > 0 ? at : 0
+}
+
+// Liked songs arrive newest first, so a watermark stops us re-reading thousands
+// of them on every launch.
+function newestAddedAt(payload) {
+  var rows = payload && Array.isArray(payload.items) ? payload.items : []
+  var best = 0
+  for (var i = 0; i < rows.length; i++) {
+    var at = Date.parse(String(rows[i] && rows[i].added_at || ""))
+    if (isFinite(at) && at > best) best = at
+  }
+  return best
+}
+
+// The watermark passed here is what we had before this run started; moving it
+// as pages arrive would stop the run on its own second page.
+function savedTrackCrawlStep(payload, offset, watermark) {
+  var hasNext = !!(payload && payload.next)
+  return {
+    done: !hasNext || pageReachesWatermark(payload, watermark),
+    nextOffset: (Number(offset) || 0) + 50,
+    newest: newestAddedAt(payload)
+  }
+}
+
+function pageReachesWatermark(payload, watermark) {
+  var mark = Number(watermark) || 0
+  if (!(mark > 0)) return false
+  var rows = payload && Array.isArray(payload.items) ? payload.items : []
+  for (var i = 0; i < rows.length; i++) {
+    var at = Date.parse(String(rows[i] && rows[i].added_at || ""))
+    if (isFinite(at) && at <= mark) return true
+  }
+  return false
+}
+
+function encodePlayHistory(record) {
+  var value = record || ({})
+  return JSON.stringify({
+    version: PLAY_RECORD_VERSION,
+    plays: value.plays || ({}),
+    touched: value.touched || ({}),
+    playlistEdits: value.playlistEdits || ({}),
+    savedTracksThrough: Number(value.savedTracksThrough) || 0,
+    savedTracksOffset: Number(value.savedTracksOffset) || 0,
+    savedTracksNewest: Number(value.savedTracksNewest) || 0,
+    likedByArtist: value.likedByArtist || ({}),
+    playDays: value.playDays || ({}),
+    playsCountedThrough: Number(value.playsCountedThrough) || 0
+  })
+}
+
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : ({})
+}
+
+var PLAY_RECORD_VERSION = 4
+
+function parsePlayHistoryRecord(raw) {
+  var record = plainObject(parseJson(raw, ({})))
+  // An older record predates fields an incremental crawl cannot backfill, so
+  // its watermark is dropped and the next crawl reads everything again.
+  var current = Number(record.version) === PLAY_RECORD_VERSION
+  return {
+    plays: mergePlayHistory(plainObject(record.plays), null),
+    touched: mergeTouchDates(plainObject(record.touched), null),
+    playlistEdits: plainObject(record.playlistEdits),
+    savedTracksThrough: current ? Number(record.savedTracksThrough) || 0 : 0,
+    savedTracksOffset: current ? Number(record.savedTracksOffset) || 0 : 0,
+    savedTracksNewest: current ? Number(record.savedTracksNewest) || 0 : 0,
+    likedByArtist: mergeLikedIndex(plainObject(record.likedByArtist), null, 200),
+    playDays: mergeDayCounts(plainObject(record.playDays), null),
+    playsCountedThrough: Number(record.playsCountedThrough) || 0
+  }
+}
+
+// The sidebar is the same library on every launch, so it is kept on disk and
+// shown before Spotify answers.
+function encodeLibraryCache(playlists, savedAlbums, followedArtists, savedShows,
+    fetchedAt) {
+  return JSON.stringify({
+    version: 1,
+    playlists: playlists || [],
+    savedAlbums: savedAlbums || [],
+    followedArtists: followedArtists || [],
+    savedShows: savedShows || [],
+    fetchedAt: Number(fetchedAt) || 0
+  })
+}
+
+// A page you have already opened is drawn from the answer we kept while a
+// fresh one is fetched behind it, the way a query cache works on the web.
+// Entries carry when they were written so the page can say whether what it is
+// showing still counts as current.
+var QUERY_CACHE_VERSION = 1
+
+function queryCacheKey(parts) {
+  var list = Array.isArray(parts) ? parts : [parts]
+  var out = []
+  for (var i = 0; i < list.length; i++)
+    out.push(list[i] === null || list[i] === undefined ? "" : String(list[i]))
+  return out.join(":")
+}
+
+// missing: there is nothing to draw, so the page has to wait for Spotify.
+// fresh: draw it and ask for nothing. stale: draw it and refetch behind it.
+function queryCacheState(entry, nowMs, staleMs) {
+  if (!entry || entry.data === undefined || entry.data === null) return "missing"
+  return timestampIsFresh(entry.updatedAt, nowMs, staleMs) ? "fresh" : "stale"
+}
+
+function putQueryEntry(entries, order, key, data, nowMs, limit) {
+  var name = String(key || "")
+  var nextEntries = shallowCopy(entries)
+  var nextOrder = Array.isArray(order) ? order.slice() : []
+  if (!name) return { entries: nextEntries, order: nextOrder }
+  nextEntries[name] = { updatedAt: Number(nowMs) || 0, data: data }
+  var evicted = touchBoundedOrder(nextOrder, name, limit)
+  if (evicted) delete nextEntries[evicted]
+  return { entries: nextEntries, order: nextOrder }
+}
+
+function dropQueryEntry(entries, order, key) {
+  var name = String(key || "")
+  var nextEntries = shallowCopy(entries)
+  var nextOrder = []
+  var source = Array.isArray(order) ? order : []
+  delete nextEntries[name]
+  for (var i = 0; i < source.length; i++)
+    if (String(source[i]) !== name) nextOrder.push(String(source[i]))
+  return { entries: nextEntries, order: nextOrder }
+}
+
+function encodeQueryCache(entries, order) {
+  return JSON.stringify({
+    version: QUERY_CACHE_VERSION,
+    order: Array.isArray(order) ? order : [],
+    entries: entries || ({})
+  })
+}
+
+// Anything older than the given age is dropped on the way in: showing a page
+// from last month before the fresh one lands is worse than showing nothing.
+function parseQueryCache(raw, nowMs, maxAgeMs) {
+  var record = plainObject(parseJson(raw, ({})))
+  var empty = { entries: ({}), order: [] }
+  if (Number(record.version) !== QUERY_CACHE_VERSION) return empty
+  var stored = plainObject(record.entries)
+  var order = Array.isArray(record.order) ? record.order : []
+  var out = { entries: ({}), order: [] }
+  for (var i = 0; i < order.length; i++) {
+    var key = String(order[i] || "")
+    var entry = stored[key]
+    if (!key || !entry || entry.data === undefined || entry.data === null) continue
+    if (!timestampIsFresh(entry.updatedAt, nowMs, maxAgeMs)) continue
+    out.entries[key] = { updatedAt: Number(entry.updatedAt) || 0, data: entry.data }
+    out.order.push(key)
+  }
+  return out
+}
+
+// A page with a header and no rows is half an answer; drawing it from the
+// cache would only replace one empty page with another.
+function pageSnapshotHasContent(snapshot) {
+  if (!snapshot || !snapshot.item) return false
+  for (var key in snapshot) {
+    if (!snapshot.hasOwnProperty(key)) continue
+    if (Array.isArray(snapshot[key]) && snapshot[key].length > 0) return true
+  }
+  return false
+}
+
+// Long pages are trimmed before being kept, because the whole cache is written
+// to disk. A trimmed list loses its cursor: paging on from where the untrimmed
+// list stopped would skip every row that was cut.
+function cappedPageSnapshot(snapshot, limit) {
+  var cap = Math.max(1, Math.floor(Number(limit) || 1))
+  var out = ({})
+  var cut = []
+  for (var key in snapshot) {
+    if (!snapshot.hasOwnProperty(key)) continue
+    var value = snapshot[key]
+    if (Array.isArray(value) && value.length > cap) {
+      out[key] = value.slice(0, cap)
+      cut.push(key)
+    } else out[key] = value
+  }
+  for (var i = 0; i < cut.length; i++) {
+    var cursor = cut[i] === "items" ? "next" : cut[i] + "Next"
+    if (out.hasOwnProperty(cursor)) out[cursor] = ""
+  }
+  return out
+}
+
+// The library changes rarely, so a recent copy is trusted rather than
+// refetched. That is about thirty requests saved on every launch.
+function libraryCacheIsFresh(fetchedAt, nowMs, maxAgeMs) {
+  var at = Number(fetchedAt) || 0
+  var now = Number(nowMs) || 0
+  var age = now - at
+  return at > 0 && age >= 0 && age <= (Number(maxAgeMs) || 0)
+}
+
+function parseLibraryCache(raw) {
+  var record = plainObject(parseJson(raw, ({})))
+  function list(value) { return Array.isArray(value) ? value : [] }
+  return {
+    playlists: list(record.playlists),
+    savedAlbums: list(record.savedAlbums),
+    followedArtists: list(record.followedArtists),
+    savedShows: list(record.savedShows),
+    fetchedAt: Number(record.fetchedAt) || 0
+  }
+}
+
+function parsePlayHistory(raw) {
+  return parsePlayHistoryRecord(raw).plays
+}
+
+// A play time is either a real timestamp we read from the history, or a guess
+// from the top lists. Each entry keeps which one it was so the sort can say so.
+function playTimeOf(entry) {
+  if (entry && typeof entry === "object") return libraryTimestamp(entry.at)
+  return libraryTimestamp(entry)
+}
+
+function playSourceOf(entry) {
+  if (entry && typeof entry === "object" && entry.source) return String(entry.source)
+  return "played"
+}
+
+function mergedPlayTimes(exact, touched, estimated) {
+  var out = {}
+
+  function take(source, label) {
+    if (!source || typeof source !== "object") return
+    for (var k in source) {
+      if (!source.hasOwnProperty(k)) continue
+      var at = playTimeOf(source[k])
+      if (!(at > 0)) continue
+      if (!out.hasOwnProperty(k) || at >= out[k].at)
+        out[k] = { at: at, source: label || playSourceOf(source[k]) }
+    }
+  }
+
+  take(estimated, "listened")
+  take(touched, null)
+  take(exact, "played")
+  return out
+}
+
+function twoDigits(value) {
+  return (value < 10 ? "0" : "") + value
+}
+
+function shortDate(ms) {
+  var d = new Date(Number(ms) || 0)
+  return d.getFullYear() + "-" + twoDigits(d.getMonth() + 1) + "-" + twoDigits(d.getDate())
+    + " " + twoDigits(d.getHours()) + ":" + twoDigits(d.getMinutes())
+    + ":" + twoDigits(d.getSeconds())
+}
+
+
+function librarySortModes() {
+  return LIBRARY_SORT_MODES.slice()
+}
+
+function libraryViewModes() {
+  return LIBRARY_VIEW_MODES.slice()
+}
+
+function normalizedLibrarySort(value) {
+  var mode = String(value || "")
+  return LIBRARY_SORT_MODES.indexOf(mode) >= 0 ? mode : "library"
+}
+
+function normalizedLibraryView(value) {
+  var mode = String(value || "")
+  return LIBRARY_VIEW_MODES.indexOf(mode) >= 0 ? mode : "list"
+}
+
+// Order the sidebar. Pinned items lead, in the order they were pinned; the rest
+// follow the chosen mode. Items the mode cannot rank — a playlist has no added
+// date, an artist never played has no play time — keep Spotify's order at the
+// bottom rather than being interleaved as though they were oldest.
+// added_at arrives as an ISO string from Spotify but a play time is already a
+// number, so accept either.
+function libraryTimestamp(value) {
+  if (value === null || value === undefined || value === "") return 0
+  var numeric = Number(value)
+  if (isFinite(numeric) && numeric > 0) return numeric
+  var parsed = Date.parse(String(value))
+  return isFinite(parsed) ? parsed : 0
+}
+
+function sortedLibraryItems(items, mode, playedAt, pinned) {
+  var source = Array.isArray(items) ? items : []
+  var order = normalizedLibrarySort(mode)
+  var plays = playedAt && typeof playedAt === "object" ? playedAt : {}
+  var pins = Array.isArray(pinned) ? pinned : []
+
+  var decorated = []
+  for (var i = 0; i < source.length; i++) {
+    var item = source[i]
+    if (!item) continue
+    var uri = String(item.uri || "")
+    decorated.push({
+      item: item,
+      index: i,
+      uri: uri,
+      pinRank: pins.indexOf(uri),
+      name: String(item.name || "").toLowerCase(),
+      addedAt: libraryTimestamp(item.addedAt),
+      playedAt: playTimeOf(plays[uri]),
+      playSource: playSourceOf(plays[uri])
+    })
+  }
+
+  function rankedFirst(a, b, valueOf) {
+    var av = valueOf(a)
+    var bv = valueOf(b)
+    var aHas = isFinite(av) && av > 0
+    var bHas = isFinite(bv) && bv > 0
+    if (aHas && bHas && av !== bv) return bv - av
+    if (aHas !== bHas) return aHas ? -1 : 1
+    return a.index - b.index
+  }
+
+  decorated.sort(function(a, b) {
+    if (a.pinRank >= 0 || b.pinRank >= 0) {
+      if (a.pinRank >= 0 && b.pinRank >= 0) return a.pinRank - b.pinRank
+      return a.pinRank >= 0 ? -1 : 1
+    }
+    if (order === "alpha") {
+      if (a.name !== b.name) return a.name < b.name ? -1 : 1
+      return a.index - b.index
+    }
+    if (order === "added") return rankedFirst(a, b, function(v) { return v.addedAt })
+    // Recents means last touched, the way Spotify's own list behaves: saving an
+    // album counts just as much as playing something.
+    if (order === "recent") return rankedFirst(a, b, function(v) {
+      return Math.max(isFinite(v.playedAt) ? v.playedAt : 0,
+        isFinite(v.addedAt) ? v.addedAt : 0)
+    })
+    return a.index - b.index
+  })
+
+  var result = []
+  for (var j = 0; j < decorated.length; j++) {
+    var entry = decorated[j]
+    var copy = shallowCopy(entry.item)
+    if (entry.pinRank >= 0) copy.pinned = true
+    copy.sortIndex = entry.index
+    if (order === "added") {
+      copy.sortValue = entry.addedAt
+      copy.sortSource = entry.addedAt > 0 ? "added" : "none"
+    } else if (order === "recent") {
+      copy.sortValue = Math.max(entry.playedAt, entry.addedAt)
+      copy.sortSource = entry.playedAt >= entry.addedAt && entry.playedAt > 0
+        ? entry.playSource : (entry.addedAt > 0 ? "added" : "none")
+    } else {
+      copy.sortValue = entry.index
+      copy.sortSource = order
+    }
+    result.push(copy)
+  }
+  return result
+}
+
+// Spotify allows four pins; pinning a fifth drops the oldest.
+function togglePinned(pinned, uri, limit) {
+  var list = Array.isArray(pinned) ? pinned.slice() : []
+  var value = String(uri || "")
+  if (!value) return list
+  var cap = Math.max(1, Math.floor(Number(limit) || 4))
+  var at = list.indexOf(value)
+  if (at >= 0) {
+    list.splice(at, 1)
+    return list
+  }
+  list.push(value)
+  while (list.length > cap) list.shift()
+  return list
+}
+
+function normalizedNormalizeVolume(value) {
+  return String(value || "On") === "Off" ? "Off" : "On"
+}
+
+function normalizedVolumeLevel(value) {
+  var level = String(value || "")
+  return VOLUME_LEVEL_PREGAIN_DB.hasOwnProperty(level) ? level : "Normal"
+}
+
+function normalizationPregainDb(level) {
+  return VOLUME_LEVEL_PREGAIN_DB[normalizedVolumeLevel(level)]
 }
 
 function normalizedShortcutHints(value) {
@@ -544,12 +1287,6 @@ function pendingSliderVolumeShouldHold(reportedSlider, pending, now) {
     > SLIDER_VOLUME_ACK_TOLERANCE
 }
 
-function displayedSliderVolume(reportedSlider, pending, now) {
-  if (pendingSliderVolumeShouldHold(reportedSlider, pending, now))
-    return clampUnit(pending.slider)
-  return clampUnit(reportedSlider)
-}
-
 function shouldRememberVolume(value) {
   return clampUnit(value) > MUTE_THRESHOLD
 }
@@ -594,7 +1331,7 @@ function backendLoadFields(body) {
 }
 
 // Preserve Spotify's current playback target unless the user explicitly chose
-// another device in this app. The local spotifyd player is only the fallback
+// another device in this app. The local engine player is only the fallback
 // when Spotify has no active device. Keeping a restricted device here avoids
 // silently moving playback locally; Spotify can report the unsupported action.
 function preferredPlaybackDevice(devices, selectedId, explicitSelection, currentDevice) {
@@ -871,9 +1608,9 @@ function spotifyTrackId(value) {
 }
 
 // Playback from another Spotify Connect device already carries a normalized
-// item. Local spotifyd playback may expose only MPRIS metadata, so synthesize
+// item. Local playback may expose only MPRIS metadata, so synthesize
 // the small track shape needed by library actions in that case. A matching
-// episode must not be mistaken for a track when spotifyd's object-path
+// episode must not be mistaken for a track when the engine's object-path
 // fallback supplied its id.
 function currentPlaybackTrack(trackId, remoteTrack, title, artist, album,
     coverUrl, durationSeconds, externalUrl) {
@@ -1360,6 +2097,83 @@ function mediaRowShouldCompact(titleWidth, availableWidth, actionCount) {
   return actions > 0 && title > available
 }
 
+// Artwork comes from Spotify's CDN on every launch. A stable name per URL lets
+// it be kept on disk instead, which is what makes a second launch quick.
+function artworkCacheName(url) {
+  var text = String(url || "")
+  if (!text) return ""
+  var hash = 5381
+  for (var i = 0; i < text.length; i++)
+    hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0
+  return hash.toString(36) + text.length.toString(36) + ".img"
+}
+
+// These are handed straight to curl, which reads a leading dash as an option
+// and will happily fetch a scheme that is not the web. Artwork is https.
+function artworkUrls(items, cached) {
+  var rows = Array.isArray(items) ? items : []
+  var have = cached && typeof cached === "object" ? cached : {}
+  var seen = {}
+  var out = []
+  for (var i = 0; i < rows.length; i++) {
+    var url = rows[i] && rows[i].imageUrl ? String(rows[i].imageUrl) : ""
+    if (url.indexOf("https://") !== 0) continue
+    if (seen[url] || have[url]) continue
+    seen[url] = true
+    out.push(url)
+  }
+  return out
+}
+
+// Searching by artist name returns other artists' work, so results had to be
+// filtered and the search re-paged until enough matched. These ask Spotify the
+// question directly, in one request each.
+function artistTopTracksRequest(artist) {
+  if (!artist || !artist.id || artist.type !== "artist") return null
+  // No market: with a signed-in account Spotify uses that account's country,
+  // which is what we want and one less thing to get wrong.
+  return {
+    path: "/artists/" + encodeURIComponent(String(artist.id)) + "/top-tracks",
+    query: null
+  }
+}
+
+function artistAlbumsRequest(artist) {
+  if (!artist || !artist.id || artist.type !== "artist") return null
+  return {
+    path: "/artists/" + encodeURIComponent(String(artist.id)) + "/albums",
+    query: { include_groups: "album,single", limit: 50 }
+  }
+}
+
+function normalizeArtistTopTracks(payload, imageWidth) {
+  var rows = payload && Array.isArray(payload.tracks) ? payload.tracks : []
+  var out = []
+  for (var i = 0; i < rows.length; i++) {
+    var track = normalizeTrack(rows[i], imageWidth || 96)
+    if (track) out.push(track)
+  }
+  return out
+}
+
+// The first reply carries the total, so every remaining page can be asked for
+// at once instead of one after another.
+function pageOffsets(total, limit, loaded) {
+  var size = Math.max(1, Number(limit) || 50)
+  var have = Math.max(0, Number(loaded) || 0)
+  var count = Math.max(0, Number(total) || 0)
+  var out = []
+  for (var at = have; at < count && out.length < 40; at += size) out.push(at)
+  return out
+}
+
+function evenColumnWidth(total, spacing, count) {
+  var columns = Math.max(0, Math.floor(Number(count) || 0))
+  if (columns < 1) return Math.max(0, Number(total) || 0)
+  var gaps = Math.max(0, Number(spacing) || 0) * (columns - 1)
+  return Math.max(80, (Math.max(0, Number(total) || 0) - gaps) / columns)
+}
+
 function responsiveResultColumns(width, twoColumnWidth) {
   var available = Math.max(0, Number(width) || 0)
   var breakpoint = Math.max(1, Number(twoColumnWidth) || 1)
@@ -1811,6 +2625,9 @@ function normalizeContext(value, imageWidth) {
     releaseDate: String(item.release_date || ""),
     ownerId: String((item.owner && (item.owner.account_id || item.owner.id)) || ""),
     ownerName: String((item.owner && item.owner.display_name) || ""),
+    followers: Number(item.followers && item.followers.total) || 0,
+    genres: Array.isArray(item.genres) ? item.genres.slice(0, 6) : [],
+    popularity: Number(item.popularity) || 0,
     collaborative: item.collaborative === true,
     public: item.public === true,
     snapshotId: String(item.snapshot_id || ""),
@@ -1940,7 +2757,7 @@ function normalizeCursorPage(container, mapper) {
   }
 }
 
-function filteredSorted(items, filterText, sortKey) {
+function filteredSorted(items, filterText, sortKey, descending) {
   var source = Array.isArray(items) ? items : []
   var term = String(filterText || "").trim().toLowerCase()
   var key = String(sortKey || "default")
@@ -1967,29 +2784,31 @@ function filteredSorted(items, filterText, sortKey) {
     rows.push({ item: item, index: i })
   }
   if (key !== "default") {
+    // Dates read newest first by default; every other column reads A to Z.
+    var dateKey = key === "date" || key === "date-asc"
+    var flip = descending === true
+    if (key === "date-asc") flip = !flip
+    var direction = dateKey ? (flip ? 1 : -1) : (flip ? -1 : 1)
     rows.sort(function(a, b) {
       var left
       var right
       if (key === "duration") {
         left = Number(a.item.durationMs) || 0
         right = Number(b.item.durationMs) || 0
-      } else if (key === "date" || key === "date-asc") {
+      } else if (dateKey) {
         left = String(a.item.addedAt || a.item.playedAt || a.item.releaseDate || "")
         right = String(b.item.addedAt || b.item.playedAt || b.item.releaseDate || "")
-        // Keep unknown dates at the end in both directions.
+        // Unknown dates stay at the end whichever way the column reads.
         if (!left && right) return 1
         if (left && !right) return -1
-        if (left < right) return key === "date-asc" ? -1 : 1
-        if (left > right) return key === "date-asc" ? 1 : -1
-        return a.index - b.index
       } else {
         left = String(key === "artist" ? a.item.subtitle
           : (key === "album" ? a.item.album : a.item.name) || "").toLowerCase()
         right = String(key === "artist" ? b.item.subtitle
           : (key === "album" ? b.item.album : b.item.name) || "").toLowerCase()
       }
-      if (left < right) return -1
-      if (left > right) return 1
+      if (left < right) return -direction
+      if (left > right) return direction
       return a.index - b.index
     })
   }
@@ -2093,6 +2912,171 @@ function playbackContextOffsetPosition(item, sourceItems, contextUri) {
   return position
 }
 
+// One line per slow request, split so it can be blamed on the queue, the token
+// refresh, or the network.
+function requestTimingLine(method, path, timings, context) {
+  var t = timings || ({})
+  var c = context || ({})
+  var queued = Math.max(0, Number(t.queuedMs) || 0)
+  var auth = Math.max(0, Number(t.authMs) || 0)
+  var wire = Math.max(0, Number(t.wireMs) || 0)
+  return String(method || "GET") + " " + redact(String(path || ""))
+    + " " + (queued + auth + wire) + " ms"
+    + " (queue " + queued + ", auth " + auth + ", wire " + wire + ")"
+    + " in-flight " + (Number(c.inFlight) || 0)
+    + " bg " + (Number(c.background) || 0)
+    + " queued " + (Number(c.queued) || 0)
+    + " " + (String(c.priority || "") || "normal")
+}
+
+var LIBRARY_FILTER_MODES = ["all", "playlist", "artist", "album", "show"]
+
+function libraryFilterModes() {
+  return LIBRARY_FILTER_MODES.slice()
+}
+
+function normalizedLibraryFilter(value) {
+  var text = String(value || "all")
+  return LIBRARY_FILTER_MODES.indexOf(text) >= 0 ? text : "all"
+}
+
+// The sidebar mixes playlists, artists, albums and podcasts.
+function filterLibraryType(items, filter) {
+  var rows = Array.isArray(items) ? items : []
+  var want = normalizedLibraryFilter(filter)
+  if (want === "all") return rows
+  var out = []
+  for (var i = 0; i < rows.length; i++)
+    if (rows[i] && String(rows[i].type || "") === want) out.push(rows[i])
+  return out
+}
+
+// Big numbers read better shortened; small ones read better in full.
+function compactCount(value) {
+  var n = Math.max(0, Math.floor(Number(value) || 0))
+  if (n >= 1000000000) return (n / 1000000000).toFixed(1) + "B"
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M"
+  if (n >= 10000) return (n / 1000).toFixed(1) + "K"
+  return groupedDigits(String(n))
+}
+
+// Turning a number into text is the engine's business, and some builds have
+// already grouped it for the locale by the time we see it. So take the digits
+// and nothing else, then group those.
+function groupedDigits(text) {
+  var digits = String(text || "").replace(/[^0-9]/g, "")
+  if (!digits) return "0"
+  var out = ""
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 === 0) out += ","
+    out += digits.charAt(i)
+  }
+  return out
+}
+
+// Spotify has no artist bio. Followers and genres are what it does tell us.
+function artistDetailLine(artist) {
+  if (!artist) return ""
+  var parts = []
+  var followers = Number(artist.followers) || 0
+  if (followers > 0) parts.push(compactCount(followers) + " followers")
+  var genres = Array.isArray(artist.genres) ? artist.genres.slice(0, 3) : []
+  if (genres.length) parts.push(genres.join(", "))
+  return parts.join(" · ")
+}
+
+// The play record keeps only the newest time per thing, so days are tallied
+// separately as plays arrive. The watermark stops the same play being counted
+// again on the next fetch.
+function playDayKey(ms) {
+  var d = new Date(Number(ms) || 0)
+  return d.getFullYear() + "-" + twoDigits(d.getMonth() + 1) + "-"
+    + twoDigits(d.getDate())
+}
+
+function countedPlayDays(payload, watermark) {
+  var rows = payload && Array.isArray(payload.items) ? payload.items : []
+  var mark = Number(watermark) || 0
+  var days = {}
+  var newest = mark
+  for (var i = 0; i < rows.length; i++) {
+    var at = Date.parse(String(rows[i] && rows[i].played_at || ""))
+    if (!isFinite(at) || at <= mark) continue
+    var key = playDayKey(at)
+    days[key] = (days[key] || 0) + 1
+    if (at > newest) newest = at
+  }
+  return { days: days, newest: newest }
+}
+
+function mergeDayCounts(stored, fresh) {
+  var out = {}
+  function take(source) {
+    if (!source || typeof source !== "object") return
+    for (var k in source) {
+      if (!source.hasOwnProperty(k)) continue
+      var n = Number(source[k]) || 0
+      if (n > 0) out[k] = (out[k] || 0) + n
+    }
+  }
+  take(stored)
+  take(fresh)
+  return out
+}
+
+// Five shades, the way a contribution grid reads at a glance.
+function heatmapLevel(count) {
+  var n = Number(count) || 0
+  if (n <= 0) return 0
+  if (n <= 2) return 1
+  if (n <= 5) return 2
+  if (n <= 12) return 3
+  return 4
+}
+
+// Whole weeks, oldest first, ending with the week the given day falls in.
+function heatmapWeeks(days, endMs, weeks) {
+  var counts = days && typeof days === "object" ? days : {}
+  var span = Math.max(1, Math.floor(Number(weeks) || 26))
+  var end = new Date(Number(endMs) || 0)
+  end.setHours(12, 0, 0, 0)
+  // Walk back to the Sunday that starts the final week.
+  var lastWeekStart = new Date(end.getTime())
+  lastWeekStart.setDate(lastWeekStart.getDate() - lastWeekStart.getDay())
+  var grid = []
+  for (var w = span - 1; w >= 0; w--) {
+    var column = []
+    for (var d = 0; d < 7; d++) {
+      var cell = new Date(lastWeekStart.getTime())
+      cell.setDate(cell.getDate() - w * 7 + d)
+      var key = playDayKey(cell.getTime())
+      var count = Number(counts[key]) || 0
+      column.push({
+        key: key,
+        count: count,
+        level: heatmapLevel(count),
+        future: cell.getTime() > end.getTime()
+      })
+    }
+    grid.push(column)
+  }
+  return grid
+}
+
+// A finished episode starts again from the beginning, not from its end.
+function podcastResumeMs(item) {
+  if (!item || item.fullyPlayed === true) return 0
+  var at = Math.floor(Number(item.resumeMs) || 0)
+  return at > 0 ? at : 0
+}
+
+function skipToSeconds(fromSeconds, bySeconds, lengthSeconds) {
+  var at = (Number(fromSeconds) || 0) + (Number(bySeconds) || 0)
+  var length = Number(lengthSeconds) || 0
+  if (at < 0) return 0
+  return length > 0 ? Math.min(at, length) : at
+}
+
 function playbackBody(item, sourceItems, contextUri) {
   if (!item || !item.uri) return null
   // Spotify's playback endpoint accepts only album, artist, and playlist
@@ -2147,7 +3131,8 @@ function playbackBody(item, sourceItems, contextUri) {
   }
   if (start < 0) {
     var single = { uris: [itemUri] }
-    if (Number(item.resumeMs) > 0) single.position_ms = Math.floor(Number(item.resumeMs))
+    var singleResume = podcastResumeMs(item)
+    if (singleResume > 0) single.position_ms = singleResume
     return single
   }
 
@@ -2161,7 +3146,8 @@ function playbackBody(item, sourceItems, contextUri) {
     uris.push(uri)
   }
   var body = { uris: uris.length ? uris : [itemUri] }
-  if (Number(item.resumeMs) > 0) body.position_ms = Math.floor(Number(item.resumeMs))
+  var resumeAt = podcastResumeMs(item)
+  if (resumeAt > 0) body.position_ms = resumeAt
   return body
 }
 

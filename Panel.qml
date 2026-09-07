@@ -46,7 +46,7 @@ Item {
   property int restoredPlaylistItemCount: 0
   property int restoredDetailItemCount: 0
 
-  property string draftDeviceName: "Omarchy Spotify"
+  property string draftDeviceName: "OmaSpotify"
   property string draftIdleMinutes: "15"
   property bool draftShowMiniPlayer: true
   property string draftShortcutPlayer: "Omarchy Music app"
@@ -68,6 +68,8 @@ Item {
   // Disclosure state for the width slider; deliberately not persisted.
   property bool barTextWidthExpanded: false
   property string draftAudioQuality: "320 kbps"
+  property bool draftNormalizeVolume: true
+  property string draftVolumeLevel: "Normal"
   property var contextItem: null
   property var contextSourceItems: []
   property string contextSourceUri: ""
@@ -79,7 +81,9 @@ Item {
   property string createPlaylistName: ""
 
   readonly property string pluginId: manifest && manifest.id
-    ? String(manifest.id) : "quickshell.spotify"
+    ? String(manifest.id) : "io.github.jeremylanger.omaspotify"
+  readonly property string appName: manifest && manifest.name
+    ? String(manifest.name) : "OmaSpotify"
   readonly property string lyricsRequestKey: "spotify-panel-lyrics"
   readonly property color foreground: Color.foreground
   readonly property color background: Color.background
@@ -116,6 +120,15 @@ Item {
     && shortcutModeLatched && !typingInField && !shortcutsBlocked
   readonly property bool shortcutHintsInPopup: shortcutHintsEnabled
     && shortcutModeLatched && !typingInField
+  readonly property var windowContentItem: window.contentItem
+  readonly property real windowWidth: window.width
+  readonly property real windowHeight: window.height
+  // The library is a list or a grid, never both. Everything the keyboard does
+  // has to follow whichever one is on screen.
+  readonly property var sidebarListView: libraryViewIsGrid ? playlistGrid
+    : playlistShortcuts
+  readonly property int playlistShortcutIndex: sidebarListView.currentIndex
+  readonly property bool searchFieldFocused: unifiedSearchField.activeFocus
   readonly property bool hintCtrlHeld: (heldModifierFlags & Qt.ControlModifier) !== 0
   readonly property bool hintShiftHeld: (heldModifierFlags & Qt.ShiftModifier) !== 0
   readonly property bool hintAltHeld: (heldModifierFlags & Qt.AltModifier) !== 0
@@ -123,45 +136,8 @@ Item {
   readonly property bool panelCursorVisible: panelCursorActive && !typingInField
     && (!shortcutsBlocked || popupCursorOpen)
 
-  component KeyHint: ShortcutHint {
-    property string region: ""
-    property string action: ""
-    ctrlHeld: root.hintCtrlHeld
-    shiftHeld: root.hintShiftHeld
-    altHeld: root.hintAltHeld
-    active: root.shortcutHintsActive
-    navHint: {
-      root.panelCursorAction
-      root.panelCursorRegion
-      root.panelCursorVisible
-      root.panelCursorActive
-      root.shortcutModeLatched
-      root.hintCtrlHeld
-      root.hintShiftHeld
-      root.hintAltHeld
-      playlistShortcuts.currentIndex
-      unifiedSearchField.activeFocus
-      return region && action ? root.navHintFor(region, action) : ""
-    }
-    foreground: root.foreground
-    accent: root.accent
-  }
-  component ContextMenuButton: Button {
-    id: ctxBtn
-    property string contextAction: ""
-    width: parent ? parent.width : implicitWidth
-    foreground: root.foreground
-    leftAlign: true
-    hasCursor: root.cursorOn("popup", contextAction)
-    focusable: false
-    onHovered: function(on) {
-      if (on && contextAction) root.setPanelCursor("popup", contextAction)
-    }
-    KeyHint {
-      region: "popup"
-      action: ctxBtn.contextAction
-      active: root.shortcutHintsInPopup
-    }
+  component KeyHint: PanelKeyHint {
+    panel: root
   }
   readonly property var panelBar: QtObject {
     readonly property color foreground: root.foreground
@@ -187,12 +163,14 @@ Item {
     draftScrollSpeed = service.scrollSpeed
     draftMaxBarTextWidth = service.maxBarTextWidth
     draftAudioQuality = service.audioQuality
+    draftNormalizeVolume = service.normalizeVolume
+    draftVolumeLevel = service.volumeLevel
   }
 
   function saveSettings(showStatus) {
     if (!service) return
     var values = {
-      deviceName: String(draftDeviceName || "").trim() || "Omarchy Spotify",
+      deviceName: String(draftDeviceName || "").trim() || "OmaSpotify",
       idleShutdownMinutes: Math.max(0, Math.min(1440,
         Math.floor(Number(draftIdleMinutes) || 0))),
       showMiniPlayer: draftShowMiniPlayer ? "On" : "Off",
@@ -204,7 +182,9 @@ Item {
       scrollBarText: draftScrollBarText ? "On" : "Off",
       scrollSpeed: Api.normalizedScrollSpeed(draftScrollSpeed),
       maxBarTextWidth: Api.normalizedMaxBarTextWidth(draftMaxBarTextWidth),
-      audioQuality: draftAudioQuality
+      audioQuality: draftAudioQuality,
+      normalizeVolume: draftNormalizeVolume ? "On" : "Off",
+      volumeLevel: draftVolumeLevel
     }
     service.persistSettings(values)
     syncDraftSettings()
@@ -219,6 +199,21 @@ Item {
     draftAudioQuality = draftAudioQuality === "96 kbps" ? "160 kbps"
       : (draftAudioQuality === "160 kbps" ? "320 kbps" : "96 kbps")
     persistDraftSettings()
+  }
+
+  function toggleNormalizeVolume() {
+    draftNormalizeVolume = !draftNormalizeVolume
+    persistDraftSettings()
+  }
+
+  function cycleVolumeLevel() {
+    draftVolumeLevel = draftVolumeLevel === "Quiet" ? "Normal"
+      : (draftVolumeLevel === "Normal" ? "Loud" : "Quiet")
+    persistDraftSettings()
+  }
+
+  function volumeLevelLabel() {
+    return Api.normalizedVolumeLevel(draftVolumeLevel)
   }
 
   function cycleShortcutPlayer() {
@@ -285,7 +280,7 @@ Item {
   }
 
   function connectionErrorText() {
-    if (!service) return "Omarchy Spotify is unavailable"
+    if (!service) return "OmaSpotify is unavailable"
     return service.lastError || service.auth.lastError || service.daemon.lastError
   }
 
@@ -436,7 +431,8 @@ Item {
       ? String(state.searchType) : "track"
     libraryType = ["tracks", "albums", "artists", "shows", "episodes", "audiobooks"]
       .indexOf(String(state.libraryType || "")) >= 0 ? String(state.libraryType) : "tracks"
-    homeType = ["recent", "tracks", "artists"].indexOf(String(state.homeType || "")) >= 0
+    homeType = ["recent", "tracks", "artists", "releases"]
+      .indexOf(String(state.homeType || "")) >= 0
       ? String(state.homeType) : "recent"
     libraryFilter = String(state.libraryFilter || "")
     librarySort = String(state.librarySort || "default")
@@ -460,7 +456,8 @@ Item {
     restoredDetailItemCount = Api.normalizedPlaylistRestoreCount(
       state.detailItemCount)
     var restoredTab = String(state.tab || "home")
-    if (["home", "discover", "search", "library", "playlists", "detail", "queue", "devices", "setup"]
+    if (["home", "discover", "search", "library", "playlists", "detail", "queue",
+      "nowplaying", "stats", "devices", "setup"]
         .indexOf(restoredTab) >= 0) currentTab = restoredTab
     if (restoreDetail !== false && currentTab === "detail" && state.detailItem) {
       var sameDetail = service.detailItem
@@ -629,12 +626,7 @@ Item {
   }
 
   function applySequenceModifiers(sequence) {
-    var parsed = Api.parseShortcutSequence(sequence)
-    var flags = 0
-    if (parsed.ctrl) flags |= Qt.ControlModifier
-    if (parsed.shift) flags |= Qt.ShiftModifier
-    if (parsed.alt) flags |= Qt.AltModifier
-    heldModifierFlags = flags
+    heldModifierFlags = shortcutModifiers.flagsForSequence(sequence)
   }
 
   function latchShortcutMode(sequence) {
@@ -656,28 +648,20 @@ Item {
     else clearShortcutMode()
   }
 
-  function isHintModifierKey(key) {
-    return key === Qt.Key_Control || key === Qt.Key_Shift
-      || key === Qt.Key_Alt || key === Qt.Key_AltGr
-  }
 
-  function hintModifierFlag(key) {
-    if (key === Qt.Key_Control) return Qt.ControlModifier
-    if (key === Qt.Key_Shift) return Qt.ShiftModifier
-    if (key === Qt.Key_Alt || key === Qt.Key_AltGr) return Qt.AltModifier
-    return 0
-  }
+
+
 
   function noteHeldModifiers(event, pressed) {
     if (!event) return
-    heldModifierFlags = Api.shortcutModifierFlagsAfterEvent(event.modifiers,
-      pressed, heldModifierFlags, hintModifierFlag(event.key))
+    heldModifierFlags = shortcutModifiers.flagsAfterEvent(event.modifiers,
+      pressed, heldModifierFlags, event.key)
   }
 
   function considerShortcutModeKey(event, pressed) {
     noteHeldModifiers(event, pressed)
     if (!pressed || typingInField) return
-    if (isHintModifierKey(event.key) || event.key === Qt.Key_Tab
+    if (shortcutModifiers.isHintModifierKey(event.key) || event.key === Qt.Key_Tab
         || event.key === Qt.Key_Backtab || event.key === Qt.Key_F6
         || (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier
           | Qt.AltModifier)) !== 0)
@@ -799,8 +783,8 @@ Item {
     var listCount = 0
     if (region === "sidebar") {
       listAction = "sidebar-playlists"
-      listIndex = playlistShortcuts.currentIndex
-      listCount = playlistShortcuts.count
+      listIndex = sidebarListView.currentIndex
+      listCount = sidebarListView.count
     } else if (region === "page") {
       listAction = Api.isCursorListAction(panelCursorAction)
         ? panelCursorAction : ""
@@ -864,9 +848,9 @@ Item {
     var back = tabDestination(true)
     return Api.cursorListRowHint({
       rowIndex: index,
-      currentIndex: playlistShortcuts.currentIndex,
-      count: playlistShortcuts.count,
-      tabRowIndex: firstVisibleIndexOf(playlistShortcuts),
+      currentIndex: sidebarListView.currentIndex,
+      count: sidebarListView.count,
+      tabRowIndex: firstVisibleIndexOf(sidebarListView),
       atList: panelCursorRegion === "sidebar"
         && panelCursorAction === "sidebar-playlists",
       previousIsCurrent: panelCursorRegion === "sidebar"
@@ -964,7 +948,8 @@ Item {
     if (service && service.currentArtistContextAvailable) actions.push("artist")
     if (service && service.currentAlbumContextAvailable) actions.push("album")
     if (service && service.playbackControllable)
-      actions.push("shuffle", "previous", "play", "next", "repeat")
+      actions.push("shuffle", spokenWordPlaying ? "back15" : "previous", "play",
+        spokenWordPlaying ? "forward30" : "next", "repeat")
     if (service && service.lyricsAvailable) actions.push("lyrics")
     if (service && service.lengthSeconds > 0 && service.playbackControllable)
       actions.push("seek")
@@ -1069,10 +1054,10 @@ Item {
   }
 
   function moveSidebarPlaylists(delta) {
-    var count = playlistShortcuts.count
-    var next = Api.listIndexAfterMove(count, playlistShortcuts.currentIndex, delta)
+    var list = sidebarListView
+    var next = Api.listIndexAfterMove(list.count, list.currentIndex, delta)
     if (next < 0) return false
-    playlistShortcuts.currentIndex = next
+    list.currentIndex = next
     return true
   }
 
@@ -1088,9 +1073,9 @@ Item {
   }
 
   function enterListAction(action, delta) {
-    if (action === "sidebar-playlists" && playlistShortcuts.count > 0) {
-      playlistShortcuts.currentIndex = delta < 0
-        ? playlistShortcuts.count - 1 : 0
+    if (action === "sidebar-playlists" && sidebarListView.count > 0) {
+      sidebarListView.currentIndex = delta < 0
+        ? sidebarListView.count - 1 : 0
       return
     }
     if (!Api.isCursorListAction(action)) return
@@ -1129,8 +1114,8 @@ Item {
   function syncCursorFocus() {
     if (!panelCursorActive || typingInField) return
     if (panelCursorAction === "sidebar-playlists") {
-      if (playlistShortcuts.currentIndex < 0 && playlistShortcuts.count > 0)
-        playlistShortcuts.currentIndex = 0
+      if (sidebarListView.currentIndex < 0 && sidebarListView.count > 0)
+        sidebarListView.currentIndex = 0
       blurPageLists()
       focusScope.forceActiveFocus()
       return
@@ -1192,16 +1177,14 @@ Item {
     else if (action === "nav-discover") chooseTab("discover")
     else if (action === "nav-radio") openLastRadio()
     else if (action === "nav-queue") chooseTab("queue")
+    else if (action === "nav-nowplaying") chooseTab("nowplaying")
+    else if (action === "nav-stats") chooseTab("stats")
     else if (action === "nav-library") chooseTab("library")
     else if (action === "nav-playlists") chooseTab("playlists")
     else if (action === "nav-create") openCreatePlaylistPopup()
     else if (action === "sidebar-playlists") {
-      var playlists = service ? service.sidebarPlaylists() : []
-      var playlist = playlists[playlistShortcuts.currentIndex]
-      if (playlist) {
-        chooseTab("playlists")
-        service.openPlaylist(playlist)
-      }
+      var rows = service ? service.sidebarPlaylists() : []
+      openSidebarItem(rows[sidebarListView.currentIndex])
     } else if (action === "nav-settings") chooseTab("setup")
     else if (action === "back") goBack()
     else if (action === "search") focusSearch()
@@ -1216,6 +1199,8 @@ Item {
     else if (action === "shuffle" && service)
       service.setShuffle(!service.shuffle)
     else if (action === "previous" && service) service.previous()
+    else if (action === "back15" && service) service.skipBySeconds(-15)
+    else if (action === "forward30" && service) service.skipBySeconds(30)
     else if (action === "play" && service) service.togglePlayback()
     else if (action === "next" && service) service.next()
     else if (action === "repeat" && service) service.cycleRepeat()
@@ -1355,7 +1340,7 @@ Item {
 
   function contextMenuButtons() {
     var result = []
-    var kids = contextMenuContent ? contextMenuContent.children : []
+    var kids = mediaContextMenu.actionButtons()
     for (var i = 0; i < kids.length; i++) {
       var child = kids[i]
       var action = child && child.contextAction ? String(child.contextAction) : ""
@@ -1574,6 +1559,8 @@ Item {
   function primaryNavigationShortcut(id) {
     if (id === "home") return "Alt+Shift+H"
     if (id === "queue") return "Alt+Shift+Q"
+    if (id === "nowplaying") return "Alt+Shift+N"
+    if (id === "stats") return "Alt+Shift+I"
     return ""
   }
 
@@ -1587,6 +1574,8 @@ Item {
       { action: "Open Settings", keys: "Ctrl+," },
       { action: "Open For You", keys: "Alt+Shift+H" },
       { action: "Open Queue", keys: "Alt+Shift+Q" },
+      { action: "Open Now playing", keys: "Alt+Shift+N" },
+      { action: "Open Your listening", keys: "Alt+Shift+I" },
       { action: "Open Devices", keys: "Alt+Shift+D" },
       { action: "Open the current artist", keys: "Ctrl+Shift+A" },
       { action: "Open the current album", keys: "Ctrl+Shift+B" },
@@ -1748,6 +1737,16 @@ Item {
     })
   }
 
+  // Popups live in their own files and hand focus back through this.
+  function restoreFocus() {
+    focusScope.forceActiveFocus()
+  }
+
+  // Focus without selecting, for the search-history chips.
+  function focusSearchField() {
+    unifiedSearchField.forceActiveFocus()
+  }
+
   function focusSearch() {
     if (!unifiedSearchBar.visible) return
     unifiedSearchField.selectAll()
@@ -1822,7 +1821,8 @@ Item {
       universalSearchActive = false
       artistSearchText = ""
       detailFilter = ""
-    } else if (["home", "discover", "search", "library", "playlists", "queue", "devices", "setup"].indexOf(requestedTab) >= 0)
+    } else if (["home", "discover", "search", "library", "playlists", "queue",
+      "nowplaying", "stats", "devices", "setup"].indexOf(requestedTab) >= 0)
       currentTab = requestedTab
     if (accountConnected) {
       openedForLogin = false
@@ -1923,7 +1923,9 @@ Item {
       label: service.lastRadioPlaying ? "Current radio" : "Last radio",
       icon: "󰎆"
     })
+    items.push({ id: "nowplaying", label: "Now playing", icon: "󰝚" })
     items.push({ id: "queue", label: "Queue", icon: "󰐕" })
+    items.push({ id: "stats", label: "Listening", icon: "󰄨" })
     return items
   }
 
@@ -1953,7 +1955,7 @@ Item {
   }
 
   // Track the combined service state directly. During the first login, the
-  // Web API token and spotifyd credential finish in separate event turns;
+  // Web API token and playback credential finish in separate event turns;
   // listening only to those nested objects can miss the final combined edge
   // while the panel loader is being remapped by the browser.
   onShortcutHintsEnabledChanged: if (!shortcutHintsEnabled) clearShortcutMode()
@@ -1991,6 +1993,8 @@ Item {
     if (currentTab === "library") return libraryPage
     if (currentTab === "playlists") return playlistsPage
     if (currentTab === "detail") return detailPage
+    if (currentTab === "nowplaying") return nowPlayingPage
+    if (currentTab === "stats") return statsPage
     if (currentTab === "queue") return queuePage
     if (currentTab === "devices") return devicesPage
     return searchPage
@@ -2003,6 +2007,8 @@ Item {
     if (currentTab === "discover") return "Discover"
     if (currentTab === "library") return "Your Library"
     if (currentTab === "playlists") return "Playlists"
+    if (currentTab === "nowplaying") return "Now playing"
+    if (currentTab === "stats") return "Your listening"
     if (currentTab === "queue") return "Queue"
     if (currentTab === "devices") return "Spotify Connect"
     if (currentTab === "setup") return "Settings"
@@ -2013,25 +2019,107 @@ Item {
     return "Search"
   }
 
-  function pageSubtitle() {
-    if (currentTab === "login") return "Connect your Spotify account to get started"
-    if (showingUniversalSearch) return activeSearchScope.available
-      ? "Searching everywhere — enable the area checkmark to narrow the results"
-      : "Songs, artists, albums, playlists, podcasts and audiobooks"
-    if (currentTab === "home") return "Recently played and your personal favorites"
-    if (currentTab === "discover") return "Personal mixes and fresh music from Spotify"
-    if (currentTab === "library") return "Songs, albums, artists, podcasts and audiobooks"
-    if (currentTab === "playlists") return "Your Spotify playlists"
-    if (currentTab === "queue") return "What plays next"
-    if (currentTab === "devices") return "Speakers and players"
-    if (currentTab === "setup") return "Account, playback and app preferences"
-    if (currentTab === "detail") {
-      if (artistScopedSearchActive)
-        return "Songs, albums and playlists matching “" + artistSearchText.trim() + "”"
-      return service && service.detailItem
-        ? Api.spotifyTypeLabel(service.detailItem.type) : "Spotify item"
+
+  function libraryFilterLabel() {
+    if (!service) return "All"
+    var mode = service.libraryFilter
+    if (mode === "playlist") return "Playlists"
+    if (mode === "artist") return "Artists"
+    if (mode === "album") return "Albums"
+    if (mode === "show") return "Podcasts"
+    return "All"
+  }
+
+  function libraryFilterIcon() {
+    if (!service) return "󰈲"
+    var mode = service.libraryFilter
+    if (mode === "playlist") return "󰲸"
+    if (mode === "artist") return "󰠃"
+    if (mode === "album") return "󰀥"
+    if (mode === "show") return "󰦔"
+    return "󰈲"
+  }
+
+  function cycleLibraryFilter() {
+    if (!service) return
+    var modes = Api.libraryFilterModes()
+    var at = modes.indexOf(service.libraryFilter)
+    service.setLibraryFilter(modes[(at + 1) % modes.length])
+  }
+
+  function librarySortLabel() {
+    var mode = service ? service.librarySort : "library"
+    if (mode === "recent") return "Recents"
+    if (mode === "added") return "Recently added"
+    if (mode === "alpha") return "Alphabetical"
+    return "Library order"
+  }
+
+  function cycleLibrarySort() {
+    if (!service) return
+    var modes = Api.librarySortModes()
+    var at = modes.indexOf(service.librarySort)
+    service.setLibrarySort(modes[(at + 1) % modes.length])
+  }
+
+  function libraryViewIcon() {
+    var mode = service ? service.libraryView : "list"
+    if (mode === "compact-list") return "󰉹"
+    if (mode === "grid") return "󰕰"
+    if (mode === "compact-grid") return "󰋣"
+    return "󰋲"
+  }
+
+  function libraryViewLabel() {
+    var mode = service ? service.libraryView : "list"
+    if (mode === "compact-list") return "Compact list"
+    if (mode === "grid") return "Grid"
+    if (mode === "compact-grid") return "Compact grid"
+    return "List"
+  }
+
+  function cycleLibraryView() {
+    if (!service) return
+    var modes = Api.libraryViewModes()
+    var at = modes.indexOf(service.libraryView)
+    service.setLibraryView(modes[(at + 1) % modes.length])
+  }
+
+  readonly property bool spokenWordPlaying: !!(service && service.currentIsSpokenWord)
+  readonly property bool libraryViewIsGrid: service
+    && service.libraryView.indexOf("grid") >= 0
+  readonly property bool libraryViewIsCompact: service
+    && service.libraryView.indexOf("compact") === 0
+  readonly property int libraryRowHeight: libraryViewIsCompact
+    ? Style.space(26) : Style.space(40)
+  readonly property int libraryThumbSize: libraryViewIsCompact
+    ? Style.space(20) : Style.space(32)
+
+  function sidebarItemIcon(item) {
+    if (item && item.pinned) return "󰐃"
+    var type = item ? String(item.type || "playlist") : "playlist"
+    if (type === "artist") return "󰠃"
+    if (type === "album") return "󰀥"
+    if (type === "show" || type === "episode") return "󰦔"
+    return "󰲸"
+  }
+
+  function sidebarItemById(id) {
+    var key = String(id || "")
+    var rows = service ? service.sidebarPlaylists() : []
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i] && String(rows[i].id || "") === key) return rows[i]
+    return null
+  }
+
+  function openSidebarItem(item) {
+    if (!item || !service) return
+    if (String(item.type || "playlist") === "playlist") {
+      chooseTab("playlists")
+      service.openPlaylist(item)
+      return
     }
-    return "Songs, artists, albums, playlists, podcasts and audiobooks"
+    openItem(item)
   }
 
   function sidebarPlaylistName(item) {
@@ -2144,192 +2232,14 @@ Item {
     }
   }
 
-  Popup {
+  ShortcutHelpPopup {
     id: shortcutHelpPopup
-    parent: window.contentItem
-    x: Math.max(Style.space(8), (window.width - width) / 2)
-    y: Math.max(Style.space(8), (window.height - height) / 2)
-    width: Math.min(Style.space(640), window.width - Style.space(32))
-    height: Math.min(Style.space(560), window.height - Style.space(24))
-    padding: Style.space(12)
-    modal: true
-    focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-    onOpened: root.disarmEscapeClose()
-    onClosed: Qt.callLater(function() { focusScope.forceActiveFocus() })
-
-    background: BorderSurface {
-      color: root.popupBackground
-      radius: Style.cornerRadius
-      borderSpec: root.popupBorderSpec
-    }
-
-    contentItem: Column {
-      id: shortcutHelpContent
-      spacing: Style.space(7)
-
-      Row {
-        id: shortcutHelpHeader
-        width: parent.width
-        spacing: Style.space(6)
-
-        Column {
-          width: Math.max(80, parent.width - shortcutHelpClose.width - parent.spacing)
-          spacing: Style.space(1)
-
-          Text {
-            width: parent.width
-            text: "Keyboard shortcuts"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
-            font.bold: true
-            elide: Text.ElideRight
-          }
-
-          Text {
-            width: parent.width
-            text: "The first shortcut lights matching controls. Playback shortcuts pause while you type."
-            color: root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            elide: Text.ElideRight
-          }
-        }
-
-        Button {
-          id: shortcutHelpClose
-          anchors.verticalCenter: parent.verticalCenter
-          iconText: "󰅖"
-          foreground: root.foreground
-          tooltipText: root.shortcutHint("Close", "Esc")
-          focusable: true
-          onClicked: shortcutHelpPopup.close()
-          KeyHint {
-            sequences: ["Esc"]
-            active: root.shortcutHintsInPopup
-          }
-        }
-      }
-
-      PanelSeparator {
-        id: shortcutHelpSeparator
-        width: parent.width
-        foreground: root.foreground
-      }
-
-      ScrollView {
-        id: shortcutHelpScroll
-        width: parent.width
-        height: Math.max(80, parent.height - shortcutHelpHeader.height
-          - shortcutHelpSeparator.height - parent.spacing * 2)
-        rightPadding: root.popupScrollbarGutter
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-        Column {
-          id: shortcutHelpList
-          width: shortcutHelpScroll.availableWidth
-          spacing: Style.space(3)
-
-          Repeater {
-            model: root.shortcutRows()
-
-            delegate: Column {
-              id: shortcutRow
-              required property var modelData
-              width: shortcutHelpList.width
-              spacing: Style.space(2)
-
-              Text {
-                width: parent.width
-                visible: String(shortcutRow.modelData.section || "") !== ""
-                topPadding: visible ? Style.space(3) : 0
-                text: String(shortcutRow.modelData.section || "")
-                color: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              Row {
-                width: parent.width
-                spacing: Style.space(6)
-
-                Text {
-                  width: Math.max(80, parent.width - shortcutKey.width - parent.spacing)
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: String(shortcutRow.modelData.action || "")
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  elide: Text.ElideRight
-                }
-
-                BorderSurface {
-                  id: shortcutKey
-                  width: shortcutKeyText.implicitWidth + Style.space(12)
-                  height: shortcutKeyText.implicitHeight + Style.space(6)
-                  radius: Style.cornerRadius
-                  color: Style.normalFillFor(root.foreground, root.accent)
-                  borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-                  Text {
-                    id: shortcutKeyText
-                    anchors.centerIn: parent
-                    text: String(shortcutRow.modelData.keys || "")
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    panel: root
   }
 
-  Popup {
+  LyricsInstallPopup {
     id: lyricsInstallPopup
-    parent: window.contentItem
-    x: Math.max(Style.space(8), (window.width - width) / 2)
-    y: Math.max(Style.space(8), (window.height - height) / 2)
-    width: Math.min(Style.space(400), window.width - Style.space(32))
-    height: lyricsInstallContent.implicitHeight + padding * 2
-    padding: Style.space(10)
-    modal: true
-    focus: true
-    closePolicy: root.service && root.service.lyricsPluginBusy
-      ? Popup.NoAutoClose
-      : Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-    onOpened: root.disarmEscapeClose()
-    onClosed: {
-      if (root.service && !root.service.lyricsPluginBusy)
-        root.service.cancelLyricsPlugin(root.lyricsRequestKey)
-      Qt.callLater(function() { focusScope.forceActiveFocus() })
-    }
-
-    background: BorderSurface {
-      color: root.popupBackground
-      radius: Style.cornerRadius
-      borderSpec: root.popupBorderSpec
-    }
-
-    contentItem: LyricsInstallPrompt {
-      id: lyricsInstallContent
-      width: parent.width
-      service: root.service
-      foreground: root.foreground
-      muted: root.muted
-      surfaceKey: root.lyricsRequestKey
-      onCanceled: lyricsInstallPopup.close()
-    }
+    panel: root
   }
 
   Connections {
@@ -2343,631 +2253,30 @@ Item {
     }
   }
 
-  Popup {
+  MediaContextMenu {
     id: mediaContextMenu
-    parent: window.contentItem
-    width: Math.min(Style.space(310), window.width - Style.space(24))
-    height: Math.min(window.height - Style.space(24),
-      contextMenuContent.implicitHeight + padding * 2)
-    padding: Style.space(6)
-    modal: true
-    dim: false
-    focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    onOpened: {
-      root.popupReturnRegion = root.panelCursorRegion
-      root.popupReturnAction = root.panelCursorAction
-      root.latchShortcutMode()
-      root.panelCursorActive = true
-      root.panelCursorRegion = "popup"
-      var actions = root.contextMenuCursorActions()
-      root.panelCursorAction = actions.length ? actions[0] : ""
-      root.ensurePanelCursor("popup")
-      contextMenuFocus.forceActiveFocus()
-    }
-    onClosed: {
-      if (root.panelCursorRegion === "popup") {
-        root.panelCursorRegion = root.popupReturnRegion
-        root.panelCursorAction = root.popupReturnAction
-        root.ensurePanelCursor(root.popupReturnRegion)
-        root.syncCursorFocus()
-      }
-      Qt.callLater(function() { focusScope.forceActiveFocus() })
-    }
-
-    background: BorderSurface {
-      color: root.popupBackground
-      radius: Style.cornerRadius
-      borderSpec: root.popupBorderSpec
-    }
-
-    contentItem: FocusScope {
-      id: contextMenuFocus
-      focus: true
-      Keys.priority: Keys.BeforeItem
-      Keys.onShortcutOverride: function(event) {
-        if (root.isHintModifierKey(event.key)) {
-          root.considerShortcutModeKey(event, true)
-          event.accepted = true
-          return
-        }
-        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-            || event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab
-            || event.key === Qt.Key_F6 || event.key === Qt.Key_Up
-            || event.key === Qt.Key_Down || event.key === Qt.Key_Left
-            || event.key === Qt.Key_Right || event.key === Qt.Key_J
-            || event.key === Qt.Key_K || event.key === Qt.Key_H
-            || event.key === Qt.Key_L || event.key === Qt.Key_Home
-            || event.key === Qt.Key_End)
-          event.accepted = true
-      }
-      Keys.onPressed: function(event) {
-        root.considerShortcutModeKey(event, true)
-        if (root.isHintModifierKey(event.key)) {
-          event.accepted = true
-          return
-        }
-        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) return
-        if (root.handleContextMenuKey(event)) event.accepted = true
-      }
-      Keys.onReturnPressed: function(event) {
-        if (root.handleContextMenuKey(event)) event.accepted = true
-      }
-      Keys.onEnterPressed: function(event) {
-        if (root.handleContextMenuKey(event)) event.accepted = true
-      }
-      Keys.onReleased: function(event) {
-        root.noteHeldModifiers(event, false)
-        if (root.isHintModifierKey(event.key)) event.accepted = true
-      }
-
-      Shortcut {
-        sequences: ["Up", "K", "Left", "H"]
-        enabled: mediaContextMenu.opened
-        onActivated: root.moveContextMenuCursor(-1)
-      }
-      Shortcut {
-        sequences: ["Down", "J", "Right", "L"]
-        enabled: mediaContextMenu.opened
-        onActivated: root.moveContextMenuCursor(1)
-      }
-      Shortcut {
-        sequences: ["Return", "Enter"]
-        enabled: mediaContextMenu.opened
-        onActivated: root.activatePanelCursor()
-      }
-
-      ScrollView {
-        id: contextMenuScroll
-        anchors.fill: parent
-        clip: true
-        focus: false
-        focusPolicy: Qt.NoFocus
-        Keys.enabled: false
-        rightPadding: contextMenuContent.implicitHeight > height
-          ? root.popupScrollbarGutter : 0
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AsNeeded
-
-        Column {
-          id: contextMenuContent
-          width: contextMenuScroll.availableWidth
-          spacing: Style.space(3)
-
-      Text {
-        width: parent.width
-        leftPadding: Style.space(8)
-        rightPadding: Style.space(8)
-        topPadding: Style.space(4)
-        bottomPadding: Style.space(4)
-        text: root.contextItem ? String(root.contextItem.name || "Spotify item") : "Spotify item"
-        color: root.muted
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        font.bold: true
-        elide: Text.ElideRight
-      }
-
-      Text {
-        width: parent.width
-        leftPadding: Style.space(8)
-        rightPadding: Style.space(8)
-        text: "Arrows or Enter to choose · Esc to close"
-        color: root.muted
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
-
-      PanelSeparator { width: parent.width; foreground: root.foreground }
-
-      ContextMenuButton {
-        contextAction: "ctx-play"
-        visible: root.contextItem
-          && ["show", "audiobook"].indexOf(root.contextItem.type) < 0
-        text: "Play"
-        iconText: "󰐊"
-        onClicked: {
-          mediaContextMenu.close()
-          root.activateMedia(root.contextItem, root.contextSourceItems,
-            root.contextPlaybackUri)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-radio"
-        visible: root.contextItem && root.contextItem.type === "track"
-        text: "Start track radio"
-        iconText: "󰎆"
-        onClicked: {
-          mediaContextMenu.close()
-          if (root.service) root.service.startRadio(root.contextItem)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-queue"
-        visible: root.contextItem
-          && ["track", "episode"].indexOf(root.contextItem.type) >= 0
-        text: "Add to queue"
-        iconText: "󰐕"
-        onClicked: {
-          mediaContextMenu.close()
-          if (root.service) root.service.addToQueue(root.contextItem)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-playlist"
-        visible: root.contextItem
-          && ["track", "episode"].indexOf(root.contextItem.type) >= 0
-        text: "Add to playlist…"
-        iconText: "󱁐"
-        onClicked: {
-          mediaContextMenu.close()
-          root.openPlaylistPicker(root.contextItem)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-details"
-        visible: root.contextItem && root.contextItem.kind === "context"
-        text: "Open details"
-        iconText: "󰋼"
-        onClicked: {
-          mediaContextMenu.close()
-          root.openItem(root.contextItem)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-own"
-        visible: root.contextItem && root.contextItem.type === "playlist"
-          && root.service && root.service.currentUserId !== ""
-          && !root.service.playlistOwned(root.contextItem)
-        text: root.service && root.service.playlistConversionBusy
-          ? "Making your copy…" : "Turn into your own playlist"
-        iconText: "󰒍"
-        enabled: root.service && !root.service.playlistActionBusy
-        onClicked: {
-          var playlist = root.contextItem
-          mediaContextMenu.close()
-          root.turnPlaylistIntoOwn(playlist)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-artist"
-        visible: root.contextItem && root.contextItem.type === "track"
-          && root.contextItem.artists && root.contextItem.artists.length
-        text: "Go to artist"
-        iconText: "󰠃"
-        onClicked: {
-          mediaContextMenu.close()
-          root.openItem(root.contextItem.artists[0])
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-album"
-        visible: root.contextItem && !!root.contextItem.albumItem
-        text: "Go to album"
-        iconText: "󰀥"
-        onClicked: {
-          mediaContextMenu.close()
-          root.openItem(root.contextItem.albumItem)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-library"
-        visible: root.contextItem && !!root.contextItem.uri
-          && root.contextItem.type !== "chapter"
-        text: root.service && root.service.isSaved(root.contextItem)
-          ? "Remove from library" : "Save to library"
-        iconText: root.service && root.service.isSaved(root.contextItem) ? "󰓎" : "󰋑"
-        onClicked: {
-          mediaContextMenu.close()
-          if (root.service) root.service.toggleSaved(root.contextItem)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-move-up"
-        visible: root.contextPlaylist && root.service
-          && root.service.playlistEditable(root.contextPlaylist)
-          && root.contextItem && root.contextItem.kind === "item"
-        text: "Move up"
-        iconText: "󰁝"
-        enabled: root.contextPlaylistMoveSpec(-1).available
-        onClicked: root.moveContextPlaylistItem(-1)
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-move-down"
-        visible: root.contextPlaylist && root.service
-          && root.service.playlistEditable(root.contextPlaylist)
-          && root.contextItem && root.contextItem.kind === "item"
-        text: "Move down"
-        iconText: "󰁅"
-        enabled: root.contextPlaylistMoveSpec(1).available
-        onClicked: root.moveContextPlaylistItem(1)
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-remove"
-        visible: root.contextPlaylist && root.service
-          && root.service.playlistEditable(root.contextPlaylist)
-          && root.contextItem && root.contextItem.kind === "item"
-        text: "Remove from playlist"
-        iconText: "󰅖"
-        onClicked: {
-          var position = root.playlistPosition(root.contextItem)
-          mediaContextMenu.close()
-          root.service.removePlaylistItem(root.contextItem, position, root.contextPlaylist)
-        }
-      }
-
-      PanelSeparator {
-        width: parent.width
-        visible: root.contextItem && root.contextItem.externalUrl
-        foreground: root.foreground
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-copy"
-        visible: root.contextItem && root.contextItem.externalUrl
-        text: "Copy Spotify link"
-        iconText: "󰌷"
-        onClicked: {
-          mediaContextMenu.close()
-          root.copyExternal(root.contextItem)
-        }
-      }
-
-      ContextMenuButton {
-        contextAction: "ctx-open"
-        visible: root.contextItem && root.contextItem.externalUrl
-        text: "Open in Spotify"
-        iconText: "󰏌"
-        onClicked: {
-          mediaContextMenu.close()
-          root.openExternal(root.contextItem)
-        }
-      }
-        }
-      }
-    }
+    panel: root
   }
 
-  Popup {
+  PlaylistPicker {
     id: playlistPicker
-    parent: window.contentItem
-    x: Math.max(Style.space(8), (window.width - width) / 2)
-    y: Math.max(Style.space(8), (window.height - height) / 2)
-    width: Math.min(Style.space(410), window.width - Style.space(32))
-    height: Math.min(Style.space(520), pickerContent.implicitHeight + padding * 2)
-    padding: Style.space(8)
-    modal: true
-    focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-    background: BorderSurface {
-      color: root.popupBackground
-      radius: Style.cornerRadius
-      borderSpec: root.popupBorderSpec
-    }
-
-    contentItem: Column {
-      id: pickerContent
-      spacing: Style.space(7)
-
-      Text {
-        width: parent.width
-        text: root.pendingPlaylistItem
-          ? "Add “" + String(root.pendingPlaylistItem.name || "song") + "” to a playlist"
-          : "Add to playlist"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-        elide: Text.ElideRight
-      }
-
-      Text {
-        width: parent.width
-        text: "Choose one of your playlists, or create a new private playlist."
-        color: root.muted
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.WordWrap
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(6)
-
-        TextField {
-          id: newPlaylistField
-          width: Math.max(80, parent.width - createPlaylistButton.width - parent.spacing)
-          foreground: root.foreground
-          placeholderText: "Name a new playlist"
-          text: root.newPlaylistName
-          onTextEdited: root.newPlaylistName = text
-          onAccepted: createPlaylistButton.clicked()
-        }
-
-        Button {
-          id: createPlaylistButton
-          text: "Create"
-          iconText: "󰐕"
-          foreground: root.foreground
-          enabled: root.service && root.newPlaylistName.trim() !== ""
-            && !root.service.playlistActionBusy
-          onClicked: {
-            if (!root.service) return
-            root.service.createPlaylist(root.newPlaylistName, function(playlist) {
-              if (root.pendingPlaylistItem) root.service.addItemToPlaylist(
-                root.pendingPlaylistItem, playlist)
-              root.newPlaylistName = ""
-              playlistPicker.close()
-            })
-          }
-        }
-      }
-
-      PanelSeparator { width: parent.width; foreground: root.foreground }
-
-      ListView {
-        id: playlistPickerList
-        width: parent.width
-        height: Math.min(Style.space(340), Math.max(Style.space(80), contentHeight))
-        model: root.service ? root.service.editablePlaylists() : []
-        clip: true
-        spacing: Style.space(2)
-        keyNavigationEnabled: true
-        highlightFollowsCurrentItem: true
-        activeFocusOnTab: true
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-        Keys.onReturnPressed: if (currentItem) currentItem.clicked()
-        Keys.onEnterPressed: if (currentItem) currentItem.clicked()
-
-        FastScrollHandler { parent: playlistPickerList; flickable: playlistPickerList }
-
-        delegate: Button {
-          required property var modelData
-          width: Math.max(80, ListView.view.width
-            - (playlistPickerList.contentHeight > playlistPickerList.height
-              ? root.popupScrollbarGutter : 0))
-          text: modelData.name || "Playlist"
-          iconText: "󰲸"
-          foreground: root.foreground
-          leftAlign: true
-          onClicked: {
-            if (root.service && root.pendingPlaylistItem)
-              root.service.addItemToPlaylist(root.pendingPlaylistItem, modelData)
-            playlistPicker.close()
-          }
-        }
-      }
-    }
+    panel: root
   }
 
-  Popup {
+  CreatePlaylistPopup {
     id: createPlaylistPopup
-    parent: window.contentItem
-    x: Math.max(Style.space(8), (window.width - width) / 2)
-    y: Math.max(Style.space(8), (window.height - height) / 2)
-    width: Math.min(Style.space(400), window.width - Style.space(24))
-    height: createPlaylistContent.implicitHeight + padding * 2
-    padding: Style.space(9)
-    modal: true
-    focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-    onOpened: Qt.callLater(function() {
-      createPlaylistNameField.selectAll()
-      createPlaylistNameField.forceActiveFocus()
-    })
-    onClosed: root.createPlaylistName = ""
-
-    background: BorderSurface {
-      color: root.popupBackground
-      radius: Style.cornerRadius
-      borderSpec: root.popupBorderSpec
-    }
-
-    contentItem: Column {
-      id: createPlaylistContent
-      spacing: Style.space(8)
-
-      Text {
-        width: parent.width
-        text: "Create a new playlist"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-      }
-
-      Text {
-        width: parent.width
-        text: "Give your new private playlist a name."
-        color: root.muted
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        wrapMode: Text.WordWrap
-      }
-
-      TextField {
-        id: createPlaylistNameField
-        width: parent.width
-        foreground: root.foreground
-        placeholderText: "Playlist name"
-        text: root.createPlaylistName
-        maximumLength: 100
-        onTextEdited: root.createPlaylistName = text
-        onAccepted: root.createNamedPlaylist()
-      }
-
-      Row {
-        width: parent.width
-        spacing: Style.space(6)
-
-        Button {
-          width: (parent.width - parent.spacing) / 2
-          text: "Cancel"
-          foreground: root.foreground
-          focusable: true
-          enabled: !root.service || !root.service.playlistActionBusy
-          onClicked: createPlaylistPopup.close()
-        }
-
-        Button {
-          id: confirmNewPlaylistButton
-          width: (parent.width - parent.spacing) / 2
-          text: root.service && root.service.playlistActionBusy ? "Creating…" : "Create"
-          iconText: "󰐕"
-          foreground: root.foreground
-          selected: true
-          focusable: true
-          enabled: root.service && root.createPlaylistName.trim() !== ""
-            && !root.service.playlistActionBusy
-          onClicked: root.createNamedPlaylist()
-        }
-      }
-    }
+    panel: root
   }
 
-  Popup {
+  SleepPopup {
     id: sleepPopup
-    parent: window.contentItem
-    x: Math.max(Style.space(8), window.width - width - Style.space(24))
-    y: Math.max(Style.space(8), window.height - height - Style.space(130))
-    width: Math.min(Style.space(270), window.width - Style.space(24))
-    height: sleepContent.implicitHeight + padding * 2
-    padding: Style.space(7)
-    modal: false
-    focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-    onOpened: {
-      root.panelCursorActive = true
-      root.panelCursorRegion = "popup"
-      root.panelCursorAction = "sleep-15"
-      root.ensurePanelCursor("popup")
-    }
-    onClosed: {
-      if (root.panelCursorRegion === "popup") {
-        root.panelCursorRegion = "footer"
-        root.panelCursorAction = "sleep"
-        root.ensurePanelCursor("footer")
-      }
-    }
-
-    background: BorderSurface {
-      color: root.popupBackground
-      radius: Style.cornerRadius
-      borderSpec: root.popupBorderSpec
-    }
-
-    contentItem: Column {
-      id: sleepContent
-      spacing: Style.space(3)
-
-      Text {
-        width: parent.width
-        text: root.service ? root.service.sleepStatusText() : "Sleep timer"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
-        leftPadding: Style.space(7)
-      }
-      PanelSeparator { width: parent.width; foreground: root.foreground }
-      Repeater {
-        model: [15, 30, 60, 120]
-        Button {
-          required property int modelData
-          width: sleepContent.width
-          text: modelData + " minutes"
-          iconText: "󰔛"
-          foreground: root.foreground
-          leftAlign: true
-          hasCursor: root.cursorOn("popup", "sleep-" + modelData)
-          KeyHint { region: "popup"; action: "sleep-" + modelData }
-          onClicked: {
-            if (root.service) root.service.setSleepMinutes(modelData)
-            sleepPopup.close()
-          }
-        }
-      }
-      Button {
-        width: parent.width
-        text: "After this item"
-        iconText: "󰐾"
-        foreground: root.foreground
-        leftAlign: true
-        hasCursor: root.cursorOn("popup", "sleep-track")
-        KeyHint { region: "popup"; action: "sleep-track" }
-        onClicked: {
-          if (root.service) root.service.sleepAfterTrack()
-          sleepPopup.close()
-        }
-      }
-      Button {
-        width: parent.width
-        text: "After this album or playlist"
-        iconText: "󰓛"
-        foreground: root.foreground
-        leftAlign: true
-        hasCursor: root.cursorOn("popup", "sleep-context")
-        KeyHint { region: "popup"; action: "sleep-context" }
-        onClicked: {
-          if (root.service) root.service.sleepAfterContext()
-          sleepPopup.close()
-        }
-      }
-      Button {
-        width: parent.width
-        visible: root.service && root.service.sleepActive
-        text: "Cancel timer"
-        iconText: "󰅖"
-        foreground: root.foreground
-        leftAlign: true
-        hasCursor: root.cursorOn("popup", "sleep-cancel")
-        KeyHint { region: "popup"; action: "sleep-cancel" }
-        onClicked: {
-          root.service.cancelSleepTimer(true)
-          sleepPopup.close()
-        }
-      }
-    }
+    panel: root
   }
 
   FloatingWindow {
     id: window
     visible: root.opened
-    title: "Omarchy Spotify"
+    title: "OmaSpotify"
     color: root.background
     implicitWidth: 980
     implicitHeight: 720
@@ -2986,7 +2295,7 @@ Item {
         root.shortcutModeLatched = false
       }
       Keys.onShortcutOverride: function(event) {
-        if (root.isHintModifierKey(event.key) && !root.typingInField) {
+        if (shortcutModifiers.isHintModifierKey(event.key) && !root.typingInField) {
           root.considerShortcutModeKey(event, true)
           event.accepted = true
           return
@@ -3005,7 +2314,7 @@ Item {
       }
       Keys.onPressed: function(event) {
         root.considerShortcutModeKey(event, true)
-        if (root.isHintModifierKey(event.key) && !root.typingInField) {
+        if (shortcutModifiers.isHintModifierKey(event.key) && !root.typingInField) {
           event.accepted = true
           return
         }
@@ -3020,7 +2329,7 @@ Item {
       }
       Keys.onReleased: function(event) {
         root.noteHeldModifiers(event, false)
-        if (root.isHintModifierKey(event.key) && !root.typingInField)
+        if (shortcutModifiers.isHintModifierKey(event.key) && !root.typingInField)
           event.accepted = true
       }
       Keys.onEscapePressed: function(event) {
@@ -3119,6 +2428,22 @@ Item {
         onActivated: {
           root.latchShortcutMode(sequence)
           root.chooseTab("queue")
+        }
+      }
+      Shortcut {
+        sequence: "Alt+Shift+I"
+        enabled: root.accountConnected && !root.shortcutsBlocked
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.chooseTab("stats")
+        }
+      }
+      Shortcut {
+        sequence: "Alt+Shift+N"
+        enabled: root.accountConnected && !root.shortcutsBlocked
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.chooseTab("nowplaying")
         }
       }
       Shortcut {
@@ -3284,9 +2609,8 @@ Item {
                 : Math.min(Style.space(214), Math.max(Style.space(176), workspace.width * 0.225)))
               : 0
             height: parent.height
-            radius: Style.cornerRadius
-            color: Style.normalFillFor(root.foreground, root.accent)
-            borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
+            color: "transparent"
+            borderSpec: Border.none()
 
             Row {
               id: brandRow
@@ -3294,8 +2618,8 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
-              anchors.margins: visible ? Style.space(11) : 0
-              height: visible ? Style.space(42) : 0
+              anchors.margins: visible ? Style.space(2) : 0
+              height: visible ? Style.space(24) : 0
               spacing: Style.space(9)
 
               Text {
@@ -3314,19 +2638,11 @@ Item {
 
                 Text {
                   width: parent.width
-                  text: "Music"
+                  text: root.appName
                   color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.subtitle
                   font.bold: true
-                  elide: Text.ElideRight
-                }
-                Text {
-                  width: parent.width
-                  text: "for Spotify"
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
                   elide: Text.ElideRight
                 }
               }
@@ -3337,7 +2653,8 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: brandRow.visible ? brandRow.bottom : parent.top
-              anchors.margins: Style.space(8)
+              anchors.margins: Style.space(2)
+              anchors.topMargin: Style.space(8)
               spacing: Style.space(2)
 
               PanelSeparator {
@@ -3387,19 +2704,15 @@ Item {
 
             Text {
               id: playlistShortcutsHeading
-              visible: !root.compactWidth
+              visible: false
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: primaryNavigation.bottom
-              anchors.leftMargin: Style.space(13)
-              anchors.rightMargin: Style.space(13)
-              anchors.topMargin: Style.space(9)
-              height: visible ? implicitHeight : 0
-              text: "YOUR LIBRARY"
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
+              anchors.leftMargin: Style.space(2)
+              anchors.rightMargin: Style.space(2)
+              anchors.topMargin: Style.space(8)
+              height: 0
+              text: ""
             }
 
             Column {
@@ -3408,8 +2721,8 @@ Item {
               anchors.right: parent.right
               anchors.top: playlistShortcutsHeading.visible
                 ? playlistShortcutsHeading.bottom : primaryNavigation.bottom
-              anchors.leftMargin: Style.space(8)
-              anchors.rightMargin: Style.space(8)
+              anchors.leftMargin: Style.space(2)
+              anchors.rightMargin: Style.space(2)
               anchors.topMargin: Style.space(6)
               spacing: Style.space(2)
 
@@ -3474,15 +2787,113 @@ Item {
               }
             }
 
-            ListView {
-              id: playlistShortcuts
+            Row {
+              id: libraryFilterRow
               visible: !root.compactWidth
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: libraryNavigation.bottom
+              anchors.margins: Style.space(2)
+              anchors.topMargin: Style.space(6)
+              height: visible ? implicitHeight : 0
+
+              Button {
+                id: libraryFilterButton
+                width: parent.width
+                iconText: root.libraryFilterIcon()
+                text: root.libraryFilterLabel()
+                foreground: root.muted
+                leftAlign: true
+                focusable: false
+                tooltipText: "Show one kind of thing"
+                onClicked: root.cycleLibraryFilter()
+              }
+            }
+
+            Row {
+              id: libraryControls
+              visible: !root.compactWidth
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: libraryFilterRow.bottom
+              anchors.margins: Style.space(2)
+              anchors.topMargin: Style.space(3)
+              height: visible ? implicitHeight : 0
+              spacing: Style.space(2)
+
+              Button {
+                id: librarySortButton
+                width: Math.max(40, parent.width - libraryViewButton.width
+                  - parent.spacing)
+                text: root.librarySortLabel()
+                iconText: "󰒺"
+                foreground: root.muted
+                leftAlign: true
+                focusable: false
+                tooltipText: "Sort the library"
+                onClicked: root.cycleLibrarySort()
+              }
+
+              Button {
+                id: libraryViewButton
+                iconText: root.libraryViewIcon()
+                foreground: root.muted
+                focusable: false
+                tooltipText: "View · " + root.libraryViewLabel()
+                onClicked: root.cycleLibraryView()
+              }
+            }
+
+            GridView {
+              id: playlistGrid
+              visible: !root.compactWidth && root.libraryViewIsGrid
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: libraryControls.bottom
               anchors.bottom: setupNavButton.top
-              anchors.margins: Style.space(8)
-              model: root.service ? root.service.sidebarPlaylists() : []
+              anchors.margins: Style.space(2)
+              model: root.service ? root.service.sidebarItems : []
+              cellWidth: Math.max(Style.space(56),
+                Math.floor(width / Math.max(1, Math.floor(width / Style.space(84)))))
+              cellHeight: root.libraryViewIsCompact
+                ? cellWidth : cellWidth + Style.space(16)
+              clip: true
+              reuseItems: true
+              keyNavigationEnabled: false
+
+              delegate: SidebarRow {
+                required property var modelData
+                width: playlistGrid.cellWidth
+                height: playlistGrid.cellHeight
+                item: modelData
+                compact: root.libraryViewIsCompact
+                grid: true
+                thumbnailSize: Math.min(width, height) - Style.space(10)
+                fallbackGlyph: root.sidebarItemIcon(modelData)
+                service: root.service
+                foreground: root.foreground
+                accent: root.accent
+                muted: root.muted
+                fontFamily: root.fontFamily
+                selected: root.currentTab === "playlists" && root.service
+                  && root.service.selectedPlaylist
+                  && root.service.selectedPlaylist.id === modelData.id
+                onActivated: root.openSidebarItem(modelData)
+                onContextRequested: {
+                  if (root.service) root.service.togglePinnedItem(modelData)
+                }
+              }
+            }
+
+            ListView {
+              id: playlistShortcuts
+              visible: !root.compactWidth && !root.libraryViewIsGrid
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: libraryControls.bottom
+              anchors.bottom: setupNavButton.top
+              anchors.margins: Style.space(2)
+              model: root.service ? root.service.sidebarItems : []
               clip: true
               spacing: Style.space(1)
               reuseItems: true
@@ -3505,27 +2916,32 @@ Item {
                     && !root.service.playlistsLoading) root.service.loadMorePlaylists()
               }
 
-              delegate: Button {
+              delegate: SidebarRow {
                 required property var modelData
                 required property int index
                 width: ListView.view.width
-                text: root.sidebarPlaylistName(modelData)
-                iconText: "󰲸"
+                height: root.libraryRowHeight
+                item: modelData
+                compact: root.libraryViewIsCompact
+                grid: false
+                thumbnailSize: root.libraryThumbSize
+                fallbackGlyph: root.sidebarItemIcon(modelData)
+                service: root.service
                 foreground: root.foreground
-                leftAlign: true
-                focusable: false
+                accent: root.accent
+                muted: root.muted
+                fontFamily: root.fontFamily
                 hasCursor: root.cursorOn("sidebar", "sidebar-playlists")
                   && ListView.isCurrentItem
                 selected: root.currentTab === "playlists" && root.service
                   && root.service.selectedPlaylist
                   && root.service.selectedPlaylist.id === modelData.id
-                tooltipText: modelData.name || "Playlist"
-                onClicked: {
-                  root.chooseTab("playlists")
-                  if (root.service) root.service.openPlaylist(modelData)
+                onActivated: root.openSidebarItem(modelData)
+                onContextRequested: {
+                  if (root.service) root.service.togglePinnedItem(modelData)
                 }
-                onHovered: function(on) {
-                  if (!on) return
+                onHoveredChanged: {
+                  if (!hovered) return
                   playlistShortcuts.currentIndex = index
                   root.setPanelCursor("sidebar", "sidebar-playlists")
                 }
@@ -3550,7 +2966,7 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.bottom: parent.bottom
-              anchors.margins: Style.space(8)
+              anchors.margins: Style.space(2)
               text: root.compactWidth ? "" : "Settings"
               iconText: root.service && root.service.auth.loggedIn ? "󰀄" : "󰒓"
               foreground: root.foreground
@@ -3577,7 +2993,7 @@ Item {
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: parent.top
-              height: Style.space(52)
+              height: Math.max(closeButton.implicitHeight, titleColumn.implicitHeight)
               spacing: Style.space(5)
 
               Button {
@@ -3595,6 +3011,7 @@ Item {
               }
 
               Column {
+                id: titleColumn
                 width: Math.max(80, parent.width
                   - (backButton.visible ? backButton.width + parent.spacing : 0)
                   - (shortcutHintsDismissButton.visible
@@ -3614,14 +3031,6 @@ Item {
                   elide: Text.ElideRight
                 }
 
-                Text {
-                  width: parent.width
-                  text: root.pageSubtitle()
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
               }
 
               Button {
@@ -3673,6 +3082,8 @@ Item {
                   else if (root.currentTab === "library")
                     root.service.loadLibrary(root.libraryType, false, true)
                   else root.service.refreshView(root.currentTab)
+                  // Refresh always means the sidebar too, cache or no cache.
+                  root.service.refreshLibraryNow()
                 }
               }
 
@@ -3727,7 +3138,8 @@ Item {
             Row {
               id: unifiedSearchBar
               visible: root.currentTab !== "login" && root.currentTab !== "devices"
-                && root.currentTab !== "setup"
+                && root.currentTab !== "setup" && root.currentTab !== "stats"
+                && root.currentTab !== "nowplaying"
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: statusBanner.visible ? statusBanner.bottom : pageHeader.bottom
@@ -3845,7 +3257,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: playerFooter.top
-          anchors.bottomMargin: Style.space(10)
+          anchors.bottomMargin: Style.space(4)
           foreground: root.foreground
         }
 
@@ -3855,15 +3267,16 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.bottom: parent.bottom
-          height: visible ? Style.space(root.compactHeight ? 88 : 104) : 0
-          radius: Style.cornerRadius
-          color: Style.normalFillFor(root.foreground, root.accent)
-          borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
+          height: visible ? Style.space(root.compactHeight ? 72 : 84) : 0
+          color: "transparent"
+          borderSpec: Border.none()
 
           Row {
             id: playerRow
             anchors.fill: parent
-            anchors.margins: Style.space(10)
+            anchors.margins: Style.space(2)
+            anchors.leftMargin: 0
+            anchors.rightMargin: 0
             spacing: Style.space(12)
 
             Item {
@@ -4114,6 +3527,7 @@ Item {
                 }
                 TransportButton {
                   glyphText: "󰒮"
+                  visible: !root.spokenWordPlaying
                   foreground: root.foreground
                   hasCursor: root.cursorOn("footer", "previous")
                   tooltipText: root.shortcutHint("Previous", "Ctrl+Left")
@@ -4123,6 +3537,18 @@ Item {
                     if (on) root.setPanelCursor("footer", "previous")
                   }
                   KeyHint { region: "footer"; action: "previous"; sequences: ["Ctrl+Left"] }
+                }
+                TransportButton {
+                  glyphText: "󰵛"
+                  visible: root.spokenWordPlaying
+                  foreground: root.foreground
+                  hasCursor: root.cursorOn("footer", "back15")
+                  tooltipText: "Back 15 seconds"
+                  enabled: root.service && root.service.playbackControllable
+                  onClicked: if (root.service) root.service.skipBySeconds(-15)
+                  onHovered: function(on) {
+                    if (on) root.setPanelCursor("footer", "back15")
+                  }
                 }
                 TransportButton {
                   glyphText: root.service && root.service.playing ? "󰏤" : "󰐊"
@@ -4140,7 +3566,20 @@ Item {
                   KeyHint { region: "footer"; action: "play"; sequences: ["Space"] }
                 }
                 TransportButton {
+                  glyphText: "󰵙"
+                  visible: root.spokenWordPlaying
+                  foreground: root.foreground
+                  hasCursor: root.cursorOn("footer", "forward30")
+                  tooltipText: "Forward 30 seconds"
+                  enabled: root.service && root.service.playbackControllable
+                  onClicked: if (root.service) root.service.skipBySeconds(30)
+                  onHovered: function(on) {
+                    if (on) root.setPanelCursor("footer", "forward30")
+                  }
+                }
+                TransportButton {
                   glyphText: "󰒭"
+                  visible: !root.spokenWordPlaying
                   foreground: root.foreground
                   hasCursor: root.cursorOn("footer", "next")
                   tooltipText: root.shortcutHint("Next", "Ctrl+Right")
@@ -4326,23 +3765,44 @@ Item {
                 }
               }
 
-              Text {
+              Row {
                 width: parent.width
+                layoutDirection: Qt.RightToLeft
+                spacing: Style.space(4)
                 visible: root.service && root.service.playbackDeviceName !== ""
-                text: root.service
-                  ? ((root.service.playing ? "Playing on " : "Connected to ")
-                    + root.service.playbackDeviceName)
-                  : ""
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                elide: Text.ElideRight
+
+                // As wide as the name, up to what the row has left, so a
+                // long name elides instead of running past the row and a
+                // short one keeps the icon beside it.
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Math.min(implicitWidth,
+                    Math.max(0, parent.width - deviceGlyph.width - parent.spacing))
+                  text: root.service ? root.service.playbackDeviceName : ""
+                  color: root.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  id: deviceGlyph
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "󰦧"
+                  color: root.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
               }
             }
           }
         }
       }
     }
+  }
+
+  ShortcutModifiers {
+    id: shortcutModifiers
   }
 
   Timer {
@@ -4369,2268 +3829,96 @@ Item {
   Component {
     id: homePage
 
-    Item {
-      Column {
-        anchors.fill: parent
-        spacing: Style.space(7)
-
-        Row {
-          id: homeTypes
-          width: parent.width
-          spacing: Style.space(4)
-
-          Repeater {
-            model: [
-              { type: "recent", label: "Recently played", icon: "󰋚" },
-              { type: "tracks", label: "Top songs", icon: "󰎈" },
-              { type: "artists", label: "Top artists", icon: "󰠃" }
-            ]
-            Button {
-              required property var modelData
-              text: modelData.label
-              iconText: modelData.icon
-              foreground: root.foreground
-              selected: root.homeType === modelData.type
-              focusable: false
-              hasCursor: root.cursorOn("page", "home-" + modelData.type)
-              onClicked: root.homeType = modelData.type
-              onHovered: function(on) {
-                if (on) root.setPanelCursor("page", "home-" + modelData.type)
-              }
-              KeyHint { region: "page"; action: "home-" + modelData.type }
-            }
-          }
-        }
-
-        MediaCollection {
-          width: parent.width
-          height: Math.max(40, parent.height - homeTypes.height - parent.spacing)
-          service: root.service
-          sourceItems: root.service ? root.service.homeItems(root.homeType) : []
-          filterText: root.homeFilter
-          showFilter: false
-          showQueue: true
-          showSave: true
-          browseContexts: true
-          loading: root.service && root.service.homeLoading
-          hasMore: false
-          restoredContentY: root.scrollFor("home:" + root.homeType)
-          stateKey: "home:" + root.homeType
-          emptyMessage: root.service && root.service.homeLoading
-            ? "Loading your listening history…"
-            : (root.homeFilter.trim() ? "No matches in " + root.activeSearchScope.label + "."
-              : "No listening history is available yet.")
-          onActivated: function(item, items, uri) {
-            root.activateMedia(item, items, uri)
-          }
-          onOpened: function(item) { root.openItem(item) }
-          onQueued: function(item) { if (root.service) root.service.addToQueue(item) }
-          onPlaylistRequested: function(item) { root.openPlaylistPicker(item) }
-          onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-          onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-            root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-          }
-          onViewStateChanged: function(filter, sort, y) {
-            root.rememberScroll("home:" + root.homeType, y)
-          }
-        }
-      }
+    HomePage {
+      panel: root
     }
   }
 
   Component {
     id: discoverPage
 
-    Item {
-      MediaCollection {
-        anchors.fill: parent
-        service: root.service
-        sourceItems: root.service ? root.service.discoverPlaylists : []
-        filterText: root.discoverFilter
-        showFilter: false
-        showQueue: false
-        showPlaylist: false
-        showSave: true
-        browseContexts: true
-        loading: root.service && root.service.discoverLoading
-        hasMore: false
-        restoredContentY: root.scrollFor("discover")
-        stateKey: "discover"
-        emptyMessage: root.service && root.service.discoverLoading
-          ? "Finding playlists picked for you…"
-          : (root.discoverFilter.trim() ? "No matches in Discover."
-            : (root.service && root.service.discoverMessage
-            ? root.service.discoverMessage : "No discovery playlists are available yet."))
-        onActivated: function(item, items, uri) {
-          root.activateMedia(item, items, uri)
-        }
-        onOpened: function(item) { root.openItem(item) }
-        onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-        onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-          root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-        }
-        onViewStateChanged: function(filter, sort, y) {
-          root.rememberScroll("discover", y)
-        }
-      }
+    DiscoverPage {
+      panel: root
     }
   }
 
   Component {
     id: detailPage
 
-    Item {
-      id: detailRoot
-      readonly property bool isArtist: root.service && root.service.detailItem
-        && root.service.detailItem.type === "artist"
-      readonly property bool searchActive: isArtist && root.artistScopedSearchActive
-      readonly property bool searchLoading: root.service
-        && root.service.artistCatalogLoading
-      readonly property int searchResultCount: root.service
-        ? root.service.artistSongs.length + root.service.artistAlbums.length
-          + root.service.artistPlaylists.length : 0
-      readonly property int searchColumnCount: Api.responsiveResultColumns(
-        Math.max(0, width - Style.space(10)), Style.space(760))
-      readonly property var searchRows: Api.sectionedMediaRows([
-        {
-          id: "songs",
-          heading: "SONGS",
-          items: root.service ? root.service.artistSongs : [],
-          loading: root.service && root.service.artistSongsLoading,
-          hasMore: root.service && root.service.artistSongsNext !== ""
-        },
-        {
-          id: "albums",
-          heading: "ALBUMS & EPS",
-          items: root.service ? root.service.artistAlbums : [],
-          loading: root.service && root.service.artistAlbumsLoading,
-          hasMore: root.service && root.service.artistAlbumsNext !== ""
-        },
-        {
-          id: "playlists",
-          heading: "PLAYLISTS",
-          items: root.service ? root.service.artistPlaylists : [],
-          loading: root.service && root.service.artistPlaylistsLoading,
-          hasMore: root.service && root.service.artistPlaylistsNext !== ""
-        }
-      ], searchColumnCount)
-
-      function artistSearchSource(sectionId) {
-        if (!root.service) return []
-        if (sectionId === "albums") return root.service.artistAlbums
-        if (sectionId === "playlists") return root.service.artistPlaylists
-        return root.service.artistSongs
-      }
-
-      function loadMoreArtistSearch(sectionId) {
-        if (!root.service) return
-        if (sectionId === "albums") root.service.loadMoreArtistAlbums()
-        else if (sectionId === "playlists") root.service.loadMoreArtistPlaylists()
-        else root.service.loadMoreArtistSongs()
-      }
-
-      Column {
-        anchors.fill: parent
-        spacing: Style.space(8)
-
-        BorderSurface {
-          id: detailHero
-          width: parent.width
-          height: visible ? Style.space(132) : 0
-          visible: !detailRoot.searchActive
-          radius: Style.cornerRadius
-          color: Style.normalFillFor(root.foreground, root.accent)
-          borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-          Row {
-            anchors.fill: parent
-            anchors.margins: Style.space(10)
-            spacing: Style.space(12)
-
-            BorderSurface {
-              width: parent.height
-              height: width
-              radius: Style.cornerRadius
-              color: Style.selectedFillFor(root.foreground, root.accent)
-              borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-              Image {
-                id: detailArtwork
-                anchors.fill: parent
-                anchors.margins: Style.space(2)
-                source: root.service && root.service.detailItem
-                  ? String(root.service.detailItem.imageUrl || "") : ""
-                sourceSize.width: 256
-                sourceSize.height: 256
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                cache: false
-                visible: status === Image.Ready
-              }
-              Text {
-                anchors.centerIn: parent
-                visible: detailArtwork.status !== Image.Ready
-                text: ""
-                color: root.service && root.service.detailItem
-                  ? root.muted
-                  : root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.displayLarge
-              }
-            }
-
-            Column {
-              width: Math.max(80, parent.width - parent.height - detailActions.width
-                - parent.spacing * 2)
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(4)
-
-              Text {
-                width: parent.width
-                text: root.service && root.service.detailItem
-                  ? root.service.detailItem.name : "Loading…"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.title
-                font.bold: true
-                elide: Text.ElideRight
-              }
-              ArtistLinks {
-                width: parent.width
-                artists: root.service && root.service.detailItem
-                  ? root.service.detailItem.artists : []
-                fallbackText: root.service && root.service.detailItem
-                  ? root.service.detailItem.subtitle : ""
-                suffixText: root.service && root.service.detailItem
-                  ? Api.artistSubtitleSuffix(root.service.detailItem) : ""
-                color: root.accent
-                accent: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                onArtistRequested: function(item) { root.openItem(item) }
-              }
-              Text {
-                width: parent.width
-                text: root.service && root.service.detailItem
-                  ? String(root.service.detailItem.description
-                    || root.service.detailItem.releaseDate || "") : ""
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                maximumLineCount: 2
-                elide: Text.ElideRight
-                wrapMode: Text.WordWrap
-              }
-            }
-
-            Column {
-              id: detailActions
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(4)
-
-              Button {
-                text: "Play"
-                iconText: "󰐊"
-                foreground: root.foreground
-                selected: true
-                focusable: false
-                hasCursor: root.cursorOn("page", "detail-play")
-                enabled: root.service && root.service.detailItem
-                  && (["show", "audiobook"].indexOf(root.service.detailItem.type) < 0
-                    || root.service.detailItems.length > 0)
-                onClicked: {
-                  if (["show", "audiobook"].indexOf(root.service.detailItem.type) >= 0)
-                    root.activateMedia(root.service.detailItems[0],
-                      root.service.detailItems, "")
-                  else root.activateMedia(root.service.detailItem)
-                }
-                onHovered: function(on) {
-                  if (on) root.setPanelCursor("page", "detail-play")
-                }
-                KeyHint { region: "page"; action: "detail-play" }
-              }
-              Button {
-                text: root.service && root.service.isSaved(root.service.detailItem)
-                  ? "Saved" : "Save"
-                iconText: root.service && root.service.isSaved(root.service.detailItem)
-                  ? "󰓎" : "󰋑"
-                foreground: Color.urgent
-                accent: Color.urgent
-                focusable: false
-                hasCursor: root.cursorOn("page", "detail-save")
-                enabled: root.service && root.service.detailItem
-                  && !root.service.isSaved(root.service.detailItem)
-                onClicked: if (root.service && !root.service.isSaved(root.service.detailItem))
-                  root.service.toggleSaved(root.service.detailItem)
-                onHovered: function(on) {
-                  if (on) root.setPanelCursor("page", "detail-save")
-                }
-                KeyHint { region: "page"; action: "detail-save" }
-              }
-              Button {
-                id: detailMoreActions
-                visible: root.service && root.service.detailItem
-                iconText: "󰇙"
-                foreground: root.foreground
-                tooltipText: root.shortcutHint("More actions", "C")
-                focusable: false
-                hasCursor: root.cursorOn("page", "detail-more")
-                onHovered: function(on) {
-                  if (on) root.setPanelCursor("page", "detail-more")
-                }
-                KeyHint {
-                  region: "page"
-                  action: "detail-more"
-                  sequences: ["C"]
-                }
-                onClicked: {
-                  var point = detailMoreActions.mapToItem(window.contentItem,
-                    detailMoreActions.width, 0)
-                  root.openMediaContext(root.service.detailItem, point.x, point.y,
-                    root.service.detailItems, root.service.detailItem.uri, -1)
-                }
-              }
-            }
-          }
-        }
-
-        Text {
-          id: detailNotice
-          width: parent.width
-          height: visible ? implicitHeight : 0
-          visible: root.service && root.service.detailMessage !== ""
-          text: root.service ? root.service.detailMessage : ""
-          color: root.muted
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-          wrapMode: Text.WordWrap
-        }
-
-        Column {
-          id: artistCatalog
-          width: parent.width
-          height: visible ? Math.max(40, parent.height - detailHero.height
-            - detailNotice.height - parent.spacing * 2) : 0
-          visible: detailRoot.isArtist && !detailRoot.searchActive
-          spacing: Style.space(7)
-
-          Row {
-            id: artistLists
-            width: parent.width
-            height: parent.height
-            spacing: Style.space(10)
-
-            Column {
-              width: Math.max(80, (parent.width - parent.spacing) / 2)
-              height: parent.height
-              spacing: Style.space(5)
-
-              Text {
-                id: artistAlbumsHeading
-                width: parent.width
-                text: root.artistSearchText.trim() ? "ALBUMS & EPS" : "TOP ALBUMS & EPS"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              MediaCollection {
-                width: parent.width
-                height: Math.max(30, parent.height - artistAlbumsHeading.height
-                  - parent.spacing)
-                keyboardListId: "list-albums"
-                service: root.service
-                sourceItems: root.service ? root.service.artistAlbums : []
-                showFilter: false
-                showQueue: false
-                showSave: true
-                browseContexts: true
-                loading: root.service && root.service.artistAlbumsLoading
-                hasMore: root.service && root.service.artistAlbumsNext !== ""
-                emptyMessage: root.service && (root.service.artistAlbumsLoading
-                  || root.service.detailLoading)
-                  ? "Finding releases…" : "No matching albums or EPs."
-                onActivated: function(item, items, uri) {
-                  root.activateMedia(item, items, uri)
-                }
-                onOpened: function(item) { root.openItem(item) }
-                onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-                onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-                  root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-                }
-                onLoadMoreRequested: if (root.service) root.service.loadMoreArtistAlbums()
-              }
-            }
-
-            Column {
-              width: Math.max(80, parent.width - parent.spacing
-                - Math.max(80, (parent.width - parent.spacing) / 2))
-              height: parent.height
-              spacing: Style.space(5)
-
-              Text {
-                id: artistSongsHeading
-                width: parent.width
-                text: root.artistSearchText.trim() ? "SONGS" : "TOP 10 SONGS"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              MediaCollection {
-                width: parent.width
-                height: Math.max(30, parent.height - artistSongsHeading.height
-                  - artistThisIsRow.height - parent.spacing
-                  * (artistThisIsRow.visible ? 2 : 1))
-                keyboardListId: "list-songs"
-                service: root.service
-                sourceItems: root.service ? root.service.artistSongs : []
-                showFilter: false
-                showQueue: true
-                showSave: true
-                browseContexts: false
-                loading: root.service && root.service.artistSongsLoading
-                hasMore: root.service && root.service.artistSongsNext !== ""
-                emptyMessage: root.service && (root.service.artistSongsLoading
-                  || root.service.detailLoading)
-                  ? "Finding songs…" : "No matching songs."
-                onActivated: function(item, items, uri) {
-                  root.activateMedia(item, items, uri)
-                }
-                onOpened: function(item) { root.openItem(item) }
-                onQueued: function(item) { if (root.service) root.service.addToQueue(item) }
-                onPlaylistRequested: function(item) { root.openPlaylistPicker(item) }
-                onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-                onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-                  root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-                }
-                onLoadMoreRequested: if (root.service) root.service.loadMoreArtistSongs()
-              }
-
-              MediaRow {
-                id: artistThisIsRow
-                objectName: "artist-thisis"
-                width: parent.width
-                height: visible ? implicitHeight : 0
-                visible: root.service && root.service.artistThisIsPlaylist
-                itemData: root.service ? root.service.artistThisIsPlaylist : null
-                selected: root.cursorOn("page", "detail-thisis")
-                foreground: root.foreground
-                accent: root.accent
-                fontFamily: root.fontFamily
-                browseOnActivate: true
-                showQueue: false
-                showPlaylist: false
-                showSave: true
-                saved: root.service && root.service.isSaved(itemData)
-                onActivated: function(item) { root.activateMedia(item, [item], item.uri) }
-                onOpenRequested: function(item) { root.openItem(item) }
-                onSaveRequested: function(item) {
-                  if (root.service) root.service.toggleSaved(item)
-                }
-                onContextRequested: function(item, sceneX, sceneY) {
-                  root.openMediaContext(item, sceneX, sceneY, [item], item.uri, 0)
-                }
-                ShortcutHint {
-                  active: root.shortcutHintsActive
-                    && root.navHintFor("page", "detail-thisis") !== ""
-                  navHint: root.navHintFor("page", "detail-thisis")
-                }
-              }
-            }
-          }
-
-        }
-
-        Item {
-          id: artistSearchPage
-          width: parent.width
-          height: visible ? Math.max(40, parent.height - detailNotice.height
-            - parent.spacing) : 0
-          visible: detailRoot.searchActive
-
-          Column {
-            anchors.fill: parent
-            spacing: Style.space(7)
-
-            Text {
-              id: artistSearchStatus
-              width: parent.width
-              text: detailRoot.searchLoading
-                ? "Searching " + (root.service && root.service.detailItem
-                  ? root.service.detailItem.name : "this artist") + "…"
-                : detailRoot.searchResultCount
-                  + (detailRoot.searchResultCount === 1 ? " result" : " results")
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-
-            ListView {
-              id: artistSearchList
-              width: Math.max(1, parent.width - Style.space(10))
-              height: Math.max(30, parent.height - artistSearchStatus.height
-                - artistSearchEmpty.height - parent.spacing * 2)
-              property string queryKey: root.artistSearchText
-              model: detailRoot.searchRows.length
-              clip: true
-              spacing: Style.space(4)
-              reuseItems: true
-              cacheBuffer: Style.space(160)
-              boundsBehavior: Flickable.StopAtBounds
-              ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-              onQueryKeyChanged: positionViewAtBeginning()
-
-              FastScrollHandler {
-                parent: artistSearchList
-                flickable: artistSearchList
-              }
-
-              delegate: Loader {
-                id: artistSearchRowLoader
-                required property int index
-                property var rowData: detailRoot.searchRows[index]
-                width: ListView.view.width
-                height: {
-                  if (!rowData) return 0
-                  if (rowData.kind === "items") return Style.space(72)
-                  return rowData.kind === "heading" ? Style.space(28) : Style.space(40)
-                }
-                sourceComponent: {
-                  if (!rowData) return null
-                  if (rowData.kind === "items") return artistSearchMediaRow
-                  return rowData.kind === "heading" ? artistSearchHeadingRow
-                    : artistSearchMoreRow
-                }
-                onLoaded: if (item) item.rowData = rowData
-                onRowDataChanged: if (item) item.rowData = rowData
-              }
-            }
-
-            Text {
-              id: artistSearchEmpty
-              width: parent.width
-              height: visible ? implicitHeight : 0
-              visible: !detailRoot.searchLoading
-                && detailRoot.searchResultCount === 0
-              text: "No songs, albums, or playlists matched this search."
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.WordWrap
-            }
-          }
-
-          Component {
-            id: artistSearchHeadingRow
-
-            Row {
-              id: searchHeadingRow
-              property var rowData: null
-              spacing: Style.space(8)
-
-              Text {
-                width: Math.max(40, parent.width - artistSearchSectionCount.width
-                  - parent.spacing)
-                anchors.verticalCenter: parent.verticalCenter
-                text: searchHeadingRow.rowData
-                  ? searchHeadingRow.rowData.heading : "RESULTS"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                elide: Text.ElideRight
-              }
-
-              Text {
-                id: artistSearchSectionCount
-                anchors.verticalCenter: parent.verticalCenter
-                text: searchHeadingRow.rowData && searchHeadingRow.rowData.loading
-                  && searchHeadingRow.rowData.count === 0 ? "Finding…"
-                  : String(searchHeadingRow.rowData
-                    ? searchHeadingRow.rowData.count : 0)
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-            }
-          }
-
-          Component {
-            id: artistSearchMediaRow
-
-            Item {
-              id: searchMediaGroup
-              property var rowData: null
-
-              Row {
-                anchors.fill: parent
-                spacing: Style.space(4)
-
-                Repeater {
-                  model: searchMediaGroup.rowData
-                    ? Api.arrayValues(searchMediaGroup.rowData.items) : []
-
-                  MediaRow {
-                    required property var modelData
-                    required property int index
-                    width: Math.max(40, (parent.width - parent.spacing
-                      * (detailRoot.searchColumnCount - 1))
-                      / detailRoot.searchColumnCount)
-                    height: parent.height
-                    itemData: modelData
-                    foreground: root.foreground
-                    accent: root.accent
-                    fontFamily: root.fontFamily
-                    browseOnActivate: searchMediaGroup.rowData
-                      && searchMediaGroup.rowData.sectionId !== "songs"
-                      && modelData && modelData.kind === "context"
-                    showQueue: searchMediaGroup.rowData
-                      && searchMediaGroup.rowData.sectionId === "songs"
-                    showPlaylist: showQueue
-                    showSave: true
-                    saved: root.service && root.service.isSaved(modelData)
-                    onActivated: function(item) {
-                      var sectionId = searchMediaGroup.rowData.sectionId
-                      root.activateMedia(item,
-                        detailRoot.artistSearchSource(sectionId), "")
-                    }
-                    onOpenRequested: function(item) { root.openItem(item) }
-                    onArtistRequested: function(item) { root.openItem(item) }
-                    onAlbumRequested: function(item) { root.openItem(item) }
-                    onQueueRequested: function(item) {
-                      if (root.service) root.service.addToQueue(item)
-                    }
-                    onPlaylistRequested: function(item) {
-                      root.openPlaylistPicker(item)
-                    }
-                    onSaveRequested: function(item) {
-                      if (root.service) root.service.toggleSaved(item)
-                    }
-                    onContextRequested: function(item, sceneX, sceneY) {
-                      var row = searchMediaGroup.rowData
-                      var items = detailRoot.artistSearchSource(row.sectionId)
-                      root.openMediaContext(item, sceneX, sceneY, items, "",
-                        row.startIndex + index)
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          Component {
-            id: artistSearchMoreRow
-
-            Item {
-              id: searchMoreRow
-              property var rowData: null
-
-              Button {
-                anchors.centerIn: parent
-                text: searchMoreRow.rowData && searchMoreRow.rowData.loading
-                  ? "Loading…" : "Load more"
-                foreground: root.foreground
-                enabled: searchMoreRow.rowData && searchMoreRow.rowData.hasMore
-                  && !searchMoreRow.rowData.loading
-                onClicked: if (searchMoreRow.rowData)
-                  detailRoot.loadMoreArtistSearch(searchMoreRow.rowData.sectionId)
-              }
-            }
-          }
-        }
-
-        MediaCollection {
-          id: detailCollection
-          width: parent.width
-          height: Math.max(40, parent.height - detailHero.height - detailNotice.height
-            - parent.spacing * 2)
-          visible: !detailRoot.isArtist
-          service: root.service
-          sourceItems: root.service ? root.service.detailItems : []
-          filterText: root.detailFilter
-          sortKey: root.detailSort
-          contextUri: root.service && root.service.detailItem
-            ? root.service.detailItem.uri : ""
-          showQueue: true
-          showFilter: false
-          showSort: true
-          showSave: true
-          browseContexts: true
-          allowReorder: root.service && root.service.detailItem
-            && root.service.playlistOwned(root.service.detailItem)
-          reorderBusy: root.service && root.service.playlistActionBusy
-          loading: root.service && root.service.detailLoading
-          hasMore: root.service && root.service.detailNext !== ""
-          restoredContentY: root.scrollFor("detail:" + (root.service && root.service.detailItem
-            ? root.service.detailItem.uri : ""))
-          stateKey: "detail:" + (root.service && root.service.detailItem
-            ? root.service.detailItem.uri : "")
-          restoreReady: !root.service || !root.service.detailRestorePending
-          emptyMessage: root.service && root.service.detailMessage
-            ? root.service.detailMessage : "No items are available for this selection."
-          onActivated: function(item, items, uri) {
-            root.activateMedia(item, items, uri)
-          }
-          onOpened: function(item) { root.openItem(item) }
-          onQueued: function(item) { if (root.service) root.service.addToQueue(item) }
-          onPlaylistRequested: function(item) { root.openPlaylistPicker(item) }
-          onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-          onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-            root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-          }
-          onReorderRequested: function(sourceIndex, destinationIndex) {
-            if (root.service && root.service.detailItem)
-              root.service.reorderPlaylistItem(sourceIndex, destinationIndex,
-                root.service.detailItem, root.service.detailItems.length,
-                root.service.detailItems)
-          }
-          onLoadMoreRequested: if (root.service) root.service.loadMoreDetail()
-          onViewStateChanged: function(filter, sort, y) {
-            root.detailFilter = filter
-            root.detailSort = sort
-            root.rememberScroll("detail:" + (root.service && root.service.detailItem
-              ? root.service.detailItem.uri : ""), y)
-          }
-        }
-      }
+    DetailPage {
+      panel: root
     }
   }
 
   Component {
     id: searchPage
 
-    Item {
-      id: searchRoot
-
-      Component.onDestruction: {
-        if (root.service) root.service.cancelSearch(false)
-      }
-
-      Column {
-        anchors.fill: parent
-        spacing: Style.space(7)
-
-        Row {
-          id: searchTypes
-          width: parent.width
-          spacing: Style.space(3)
-
-          Repeater {
-            model: [
-              { type: "track", label: "Songs" },
-              { type: "artist", label: "Artists" },
-              { type: "album", label: "Albums" },
-              { type: "playlist", label: "Playlists" },
-              { type: "show", label: "Podcasts" },
-              { type: "episode", label: "Episodes" },
-              { type: "audiobook", label: "Books" }
-            ]
-
-            Button {
-              required property var modelData
-              text: modelData.label
-              foreground: root.foreground
-              selected: root.searchType === modelData.type
-              focusable: false
-              horizontalPadding: Style.space(7)
-              hasCursor: root.cursorOn("page", "search-" + modelData.type)
-              onClicked: root.searchType = modelData.type
-              onHovered: function(on) {
-                if (on) root.setPanelCursor("page", "search-" + modelData.type)
-              }
-              KeyHint { region: "page"; action: "search-" + modelData.type }
-            }
-          }
-        }
-
-        Column {
-          width: parent.width
-          spacing: Style.space(7)
-          visible: root.searchText.trim() === ""
-
-          Row {
-            width: parent.width
-
-            Text {
-              text: "RECENT SEARCHES"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
-            Item { width: Math.max(0, parent.width - clearHistory.width - Style.space(120)); height: 1 }
-            Button {
-              id: clearHistory
-              text: "Clear"
-              foreground: root.foreground
-              visible: root.service && root.service.searchHistory.length > 0
-              onClicked: root.service.clearSearchHistory()
-            }
-          }
-
-          Flow {
-            width: parent.width
-            spacing: Style.space(5)
-
-            Repeater {
-              model: root.service ? root.service.searchHistory : []
-              Button {
-                required property string modelData
-                text: modelData
-                iconText: "󰍉"
-                foreground: root.foreground
-                onClicked: {
-                  root.searchText = modelData
-                  root.service.search(modelData)
-                  Qt.callLater(function() { unifiedSearchField.forceActiveFocus() })
-                }
-              }
-            }
-          }
-
-          Text {
-            width: parent.width
-            visible: !root.service || root.service.searchHistory.length === 0
-            text: "Type a title, artist, album, playlist, podcast, episode, or audiobook."
-            color: root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-        }
-
-        MediaCollection {
-          id: resultsView
-          width: parent.width
-          height: Math.max(40, parent.height - searchTypes.height - parent.spacing)
-          visible: root.searchText.trim() !== ""
-          service: root.service
-          sourceItems: root.service ? root.service.searchItems(root.searchType) : []
-          showFilter: false
-          showQueue: true
-          showSave: true
-          browseContexts: true
-          loading: root.service && root.service.searchLoading
-          hasMore: root.service && root.service.searchNext(root.searchType) !== ""
-          restoredContentY: root.scrollFor("search:" + root.searchType)
-          stateKey: "search:" + root.searchType
-          emptyMessage: root.service && root.service.searchLoading
-            ? "Searching…" : "No " + Api.searchTypeLabel(root.searchType)
-              + " results."
-          onActivated: function(item, items, uri) {
-            root.activateMedia(item, items, uri)
-          }
-          onOpened: function(item) { root.openItem(item) }
-          onQueued: function(item) { if (root.service) root.service.addToQueue(item) }
-          onPlaylistRequested: function(item) { root.openPlaylistPicker(item) }
-          onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-          onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-            root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-          }
-          onLoadMoreRequested: if (root.service) root.service.loadMoreSearch(root.searchType)
-          onViewStateChanged: function(filter, sort, y) {
-            root.rememberScroll("search:" + root.searchType, y)
-          }
-        }
-      }
-
+    SearchPage {
+      panel: root
     }
   }
 
   Component {
     id: libraryPage
 
-    Item {
-      Component.onCompleted: if (root.service) root.service.loadLibrary(root.libraryType, false)
-
-      Column {
-        anchors.fill: parent
-        spacing: Style.space(7)
-
-        Row {
-          id: libraryTypes
-          width: parent.width
-          spacing: Style.space(4)
-
-          Repeater {
-            model: [
-              { type: "tracks", label: "Songs", icon: "󰎈" },
-              { type: "albums", label: "Albums", icon: "󰀥" },
-              { type: "artists", label: "Artists", icon: "󰠃" },
-              { type: "shows", label: "Podcasts", icon: "󰦔" },
-              { type: "episodes", label: "Episodes", icon: "󰐾" },
-              { type: "audiobooks", label: "Books", icon: "󰂺" }
-            ]
-            Button {
-              required property var modelData
-              text: modelData.label
-              iconText: modelData.icon
-              foreground: root.foreground
-              selected: root.libraryType === modelData.type
-              focusable: false
-              hasCursor: root.cursorOn("page", "library-" + modelData.type)
-              onClicked: {
-                root.libraryType = modelData.type
-                if (root.service) root.service.loadLibrary(modelData.type, false)
-              }
-              onHovered: function(on) {
-                if (on) root.setPanelCursor("page", "library-" + modelData.type)
-              }
-              KeyHint { region: "page"; action: "library-" + modelData.type }
-            }
-          }
-        }
-
-        MediaCollection {
-          id: libraryCollection
-          width: parent.width
-          height: Math.max(40, parent.height - libraryTypes.height - parent.spacing)
-          service: root.service
-          sourceItems: root.service ? root.service.libraryItems(root.libraryType) : []
-          filterText: root.libraryFilter
-          sortKey: root.librarySort
-          showFilter: false
-          showSort: true
-          showQueue: true
-          showSave: true
-          browseContexts: true
-          loading: root.service && root.service.libraryLoading(root.libraryType)
-          hasMore: root.service && root.service.libraryNext(root.libraryType) !== ""
-          restoredContentY: root.scrollFor("library:" + root.libraryType)
-          stateKey: "library:" + root.libraryType
-          emptyMessage: root.service && root.service.libraryLoading(root.libraryType)
-            ? "Loading your library…"
-            : (root.libraryFilter.trim()
-              ? "No matches in " + root.activeSearchScope.label + "."
-              : "No saved items in this section.")
-          onActivated: function(item, items, uri) {
-            root.activateMedia(item, items, uri)
-          }
-          onOpened: function(item) { root.openItem(item) }
-          onQueued: function(item) { if (root.service) root.service.addToQueue(item) }
-          onPlaylistRequested: function(item) { root.openPlaylistPicker(item) }
-          onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-          onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-            root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-          }
-          onLoadMoreRequested: if (root.service) root.service.loadLibrary(root.libraryType, true)
-          onViewStateChanged: function(filter, sort, y) {
-            root.libraryFilter = filter
-            root.librarySort = sort
-            root.rememberScroll("library:" + root.libraryType, y)
-          }
-        }
-      }
+    LibraryPage {
+      panel: root
     }
   }
 
   Component {
     id: playlistsPage
 
-    Item {
-      Column {
-        anchors.fill: parent
-        spacing: Style.space(6)
+    PlaylistsPage {
+      panel: root
+    }
+  }
 
-        Column {
-          id: selectedPlaylistHeader
-          width: parent.width
-          spacing: Style.space(6)
+  Component {
+    id: statsPage
 
-          SearchableDropdown {
-            visible: root.compactWidth
-            width: parent.width
-            height: visible ? implicitHeight : 0
-            showLabel: false
-            foreground: root.foreground
-            background: root.background
-            accent: root.accent
-            fontFamily: root.fontFamily
-            placeholderText: "Choose a playlist…"
-            emptyText: root.service && root.service.playlistsLoading
-              ? "Loading playlists…" : "No playlists found"
-            options: root.playlistOptions()
-            value: root.service && root.service.selectedPlaylist
-              ? String(root.service.selectedPlaylist.id) : ""
-            onChanged: function(value) {
-              var playlist = root.service ? root.service.playlistById(value) : null
-              if (playlist) root.service.openPlaylist(playlist)
-            }
-          }
+    StatsPage {
+      panel: root
+    }
+  }
 
-          Button {
-            visible: root.compactWidth && root.service
-              && root.service.playlistsNext !== ""
-            width: parent.width
-            text: root.service && root.service.playlistsLoading
-              ? "Loading more playlists…" : "Load more playlists"
-            iconText: "󰑐"
-            foreground: root.foreground
-            enabled: root.service && !root.service.playlistsLoading
-            onClicked: root.service.loadMorePlaylists()
-          }
+  Component {
+    id: nowPlayingPage
 
-          Row {
-            width: parent.width
-            spacing: Style.space(4)
-
-            Text {
-              width: Math.max(40, parent.width
-                - (playPlaylist.visible ? playPlaylist.width + parent.spacing : 0)
-                - (playlistMoreActions.visible
-                  ? playlistMoreActions.width + parent.spacing : 0))
-              text: root.service && root.service.selectedPlaylist
-                ? root.service.selectedPlaylist.name : "Select a playlist"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.subtitle
-              font.bold: true
-              elide: Text.ElideRight
-            }
-
-            Button {
-              id: playPlaylist
-              visible: root.service && root.service.selectedPlaylist
-              iconText: "󰐊"
-              text: "Play"
-              foreground: root.foreground
-              selected: true
-              enabled: !playlistItemsCollection.playbackUsesVisibleOrder
-                || playlistItemsCollection.visibleItems.length > 0
-              hasCursor: root.cursorOn("page", "playlist-play")
-              tooltipText: playlistItemsCollection.playbackUsesVisibleOrder
-                ? Api.visibleOrderPlaybackMessage(
-                  playlistItemsCollection.visibleItems.length)
-                : "Play this playlist in its original order"
-              onClicked: root.playSelectedPlaylist()
-              onHovered: function(on) {
-                if (on) root.setPanelCursor("page", "playlist-play")
-              }
-              KeyHint { region: "page"; action: "playlist-play" }
-            }
-
-            Button {
-              id: playlistMoreActions
-              visible: root.service && root.service.selectedPlaylist
-              iconText: "󰇙"
-              foreground: root.foreground
-              tooltipText: root.shortcutHint("More actions", "C")
-              hasCursor: root.cursorOn("page", "playlist-more")
-              onHovered: function(on) {
-                if (on) root.setPanelCursor("page", "playlist-more")
-              }
-              KeyHint {
-                region: "page"
-                action: "playlist-more"
-                sequences: ["C"]
-              }
-              onClicked: {
-                var point = playlistMoreActions.mapToItem(window.contentItem,
-                  playlistMoreActions.width, 0)
-                root.openMediaContext(root.service.selectedPlaylist, point.x, point.y,
-                  [], root.service.selectedPlaylist.uri, -1)
-              }
-            }
-          }
-
-          Button {
-            width: parent.width
-            visible: root.service && root.service.selectedPlaylist
-              && root.service.currentUserId !== ""
-              && !root.service.playlistOwned(root.service.selectedPlaylist)
-            text: root.service && root.service.playlistConversionBusy
-              ? "Making your copy…" : "Turn into your own playlist"
-            iconText: "󰒍"
-            foreground: root.foreground
-            selected: true
-            enabled: root.service && !root.service.playlistActionBusy
-            tooltipText: "Copy every available item, then remove the followed original"
-            onClicked: root.turnPlaylistIntoOwn(root.service.selectedPlaylist)
-          }
-        }
-
-        MediaCollection {
-          id: playlistItemsCollection
-          width: parent.width
-          height: Math.max(40, parent.height - selectedPlaylistHeader.height - parent.spacing)
-          service: root.service
-          sourceItems: root.service ? root.service.playlistItems : []
-          filterText: root.playlistFilter
-          sortKey: root.playlistSort
-          contextUri: root.service && root.service.selectedPlaylist
-            ? root.service.selectedPlaylist.uri : ""
-          showQueue: true
-          showFilter: false
-          showSort: true
-          showSave: true
-          browseContexts: false
-          allowReorder: root.service && root.service.selectedPlaylist
-            && root.service.playlistOwned(root.service.selectedPlaylist)
-          reorderBusy: root.service && root.service.playlistActionBusy
-          loading: root.service && root.service.playlistItemsLoading
-          hasMore: root.service && root.service.playlistItemsNext !== ""
-          emptyMessage: root.service && root.service.selectedPlaylist
-            ? (root.service.playlistItemsEmptyMessage
-              || "This playlist has no visible items.")
-            : (root.compactWidth ? "Choose a playlist above."
-              : "Choose a playlist from the sidebar.")
-          restoredContentY: root.scrollFor("playlist:" + (root.service
-            && root.service.selectedPlaylist ? root.service.selectedPlaylist.id : ""))
-          stateKey: "playlist:" + (root.service && root.service.selectedPlaylist
-            ? root.service.selectedPlaylist.id : "")
-          restoreReady: !root.service || !root.service.playlistRestorePending
-          onActivated: function(item, items, uri) {
-            root.activateMedia(item, items, uri,
-              playbackUsesVisibleOrder
-                ? Api.visibleOrderPlaybackMessage(items.length) : "")
-          }
-          onOpened: function(item) { root.openItem(item) }
-          onQueued: function(item) { if (root.service) root.service.addToQueue(item) }
-          onPlaylistRequested: function(item) { root.openPlaylistPicker(item) }
-          onSaveToggled: function(item) { if (root.service) root.service.toggleSaved(item) }
-          onContextRequested: function(item, x, y, index, items, uri, playbackUri) {
-            root.openMediaContext(item, x, y, items, uri, index, playbackUri)
-          }
-          onReorderRequested: function(sourceIndex, destinationIndex) {
-            if (root.service && root.service.selectedPlaylist)
-              root.service.reorderPlaylistItem(sourceIndex, destinationIndex,
-                root.service.selectedPlaylist, root.service.playlistItems.length,
-                root.service.playlistItems)
-          }
-          onLoadMoreRequested: if (root.service) root.service.loadMorePlaylistItems()
-          onViewStateChanged: function(filter, sort, y) {
-            root.playlistFilter = filter
-            root.playlistSort = sort
-            root.rememberScroll("playlist:" + (root.service
-              && root.service.selectedPlaylist ? root.service.selectedPlaylist.id : ""), y)
-          }
-        }
-      }
+    NowPlayingPage {
+      panel: root
     }
   }
 
   Component {
     id: queuePage
 
-    Item {
-      id: queueRoot
-      readonly property var visibleItems: Api.filteredSorted(
-        root.service ? root.service.queue : [], root.queueFilter, "default")
-
-      Column {
-        anchors.fill: parent
-        spacing: Style.space(8)
-
-        Row {
-          width: parent.width
-
-          Text {
-            text: "UP NEXT"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-
-          Item { width: Math.max(0, parent.width - queueRefresh.width - Style.space(80)); height: 1 }
-
-          Button {
-            id: queueRefresh
-            text: root.service && root.service.queueLoading ? "Loading…" : "Refresh"
-            iconText: "󰑐"
-            foreground: root.foreground
-            enabled: root.service && !root.service.queueLoading
-            onClicked: root.service.loadQueue()
-          }
-        }
-
-        ListView {
-          id: queueList
-          objectName: "page-list"
-          width: parent.width
-          height: Math.max(60, parent.height - Style.space(44))
-          model: queueRoot.visibleItems
-          clip: true
-          spacing: Style.space(3)
-          reuseItems: true
-          cacheBuffer: Style.space(140)
-          keyNavigationEnabled: false
-          highlightFollowsCurrentItem: true
-          activeFocusOnTab: false
-          ScrollBar.vertical: ScrollBar { }
-          Keys.onReturnPressed: function(event) {
-            if (!root.cursorOn("page", "list")) {
-              event.accepted = false
-              return
-            }
-            if (currentItem) currentItem.triggerPrimary()
-            event.accepted = true
-          }
-          Keys.onEnterPressed: function(event) {
-            if (!root.cursorOn("page", "list")) {
-              event.accepted = false
-              return
-            }
-            if (currentItem) currentItem.triggerPrimary()
-            event.accepted = true
-          }
-
-          FastScrollHandler { parent: queueList; flickable: queueList }
-
-          Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.top: parent.top
-            anchors.topMargin: Style.space(16)
-            width: Math.max(80, parent.width - Style.space(24))
-            visible: queueList.count === 0
-            text: root.service && root.service.queueLoading
-              ? "Loading the queue…"
-              : (root.queueFilter.trim()
-                ? "No matching songs in the queue."
-                : "Nothing is queued to play next.")
-            color: root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            wrapMode: Text.WordWrap
-            horizontalAlignment: Text.AlignHCenter
-          }
-
-          delegate: MediaRow {
-            required property var modelData
-            required property int index
-            itemData: modelData
-            foreground: root.foreground
-            accent: root.accent
-            fontFamily: root.fontFamily
-            selected: ListView.isCurrentItem
-              && root.cursorOn("page", "list")
-            showQueue: false
-            showSave: true
-            saved: root.service && root.service.isSaved(modelData)
-            onActivated: function(item) {
-              root.activateMedia(item, queueRoot.visibleItems, "")
-            }
-            onArtistRequested: function(item) { root.openItem(item) }
-            onAlbumRequested: function(item) { root.openItem(item) }
-            onOpenRequested: function(item) { root.openItem(item) }
-            onPlaylistRequested: function(item) { root.openPlaylistPicker(item) }
-            onSaveRequested: function(item) { if (root.service) root.service.toggleSaved(item) }
-            onContextRequested: function(item, sceneX, sceneY) {
-              root.openMediaContext(item, sceneX, sceneY,
-                queueRoot.visibleItems, "", index)
-            }
-            ShortcutHint {
-              active: hint !== ""
-              navHint: hint
-              readonly property string hint: {
-                queueList.currentIndex
-                queueList.contentY
-                root.panelCursorAction
-                root.panelCursorRegion
-                root.hintCtrlHeld
-                return root.pageListRowHint(index, queueList)
-              }
-            }
-          }
-        }
-      }
+    QueuePage {
+      panel: root
     }
   }
 
   Component {
     id: devicesPage
 
-    Item {
-      ScrollView {
-        id: devicesScroll
-        anchors.fill: parent
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-        Column {
-          width: devicesScroll.availableWidth
-          spacing: Style.space(9)
-
-          Row {
-            width: parent.width
-            spacing: Style.space(8)
-
-            Text {
-              width: Math.max(80, parent.width - deviceRefresh.width - parent.spacing)
-              text: "Choose where your music plays. This computer and nearby Spotify Connect devices appear here."
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              wrapMode: Text.WordWrap
-            }
-
-            Button {
-              id: deviceRefresh
-              text: root.service && root.service.devicesLoading ? "Loading…" : "Refresh"
-              iconText: "󰑐"
-              foreground: root.foreground
-              enabled: root.service && !root.service.devicesLoading
-                && !root.service.deviceActivationBusy
-              onClicked: root.service.loadDevices(null, undefined, true)
-            }
-          }
-
-          Button {
-            text: "Start this computer"
-            iconText: "󰓃"
-            foreground: root.foreground
-            visible: root.service && root.service.fullyConnected
-              && !root.service.daemon.running
-            enabled: root.service && !root.service.daemon.busy
-            onClicked: if (root.service) root.service.startEngine()
-          }
-
-          Text {
-            width: parent.width
-            visible: root.service && root.service.devicesLoading
-              && root.service.devices.length === 0
-            text: "Looking for speakers and this computer…"
-            color: root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          Text {
-            text: "AVAILABLE DEVICES"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-
-          Text {
-            width: parent.width
-            text: "A nearby speaker may take a moment to connect the first time you choose it."
-            color: root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          Repeater {
-            model: root.service ? root.service.devices : []
-
-            delegate: BorderSurface {
-            id: deviceRow
-            required property var modelData
-            width: devicesScroll.availableWidth
-            implicitHeight: Style.space(58)
-            height: implicitHeight
-            radius: Style.cornerRadius
-            color: modelData.id === (root.service ? root.service.selectedDeviceId : "")
-              ? Style.selectedFillFor(root.foreground, root.accent)
-              : (deviceHover.hovered ? Style.hoverFillFor(root.foreground, root.accent) : "transparent")
-            borderSpec: modelData.active
-              ? Border.controlSpec("selected", root.foreground, root.accent) : Border.none()
-
-            HoverHandler { id: deviceHover }
-            MouseArea {
-              anchors.fill: parent
-              enabled: (!deviceRow.modelData.restricted
-                || deviceRow.modelData.activationRequired) && root.service
-                && !root.service.deviceActivationBusy
-              cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
-              onClicked: if (root.service) root.service.selectDevice(deviceRow.modelData.id, true)
-            }
-
-            Row {
-              anchors.fill: parent
-              anchors.margins: Style.space(9)
-              spacing: Style.space(10)
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: deviceRow.modelData.type.toLowerCase() === "computer" ? "󰟀" : "󰋋"
-                color: deviceRow.modelData.active ? root.accent : root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.iconLarge
-              }
-
-              Column {
-                width: Math.max(40, parent.width - Style.space(150))
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-
-                Text {
-                  width: parent.width
-                  text: deviceRow.modelData.name
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  font.bold: deviceRow.modelData.active
-                  elide: Text.ElideRight
-                }
-                Text {
-                  width: parent.width
-                  text: deviceRow.modelData.type
-                    + (deviceRow.modelData.description ? " · " + deviceRow.modelData.description : "")
-                    + (deviceRow.modelData.local ? " · this computer" : "")
-                    + (deviceRow.modelData.localDiscovery ? " · nearby" : "")
-                    + (deviceRow.modelData.restricted
-                      ? (deviceRow.modelData.active
-                        ? (root.service && root.service.sonosControlAvailable
-                          ? " · local controls" : " · limited controls")
-                        : " · unavailable") : "")
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.service && root.service.deviceActivationBusy
-                    && deviceRow.modelData.id === root.service.selectedDeviceId ? "Connecting"
-                  : (deviceRow.modelData.active ? "Active"
-                    : (deviceRow.modelData.activationRequired ? "Available"
-                      : Math.round(deviceRow.modelData.volumePercent) + "%"))
-                color: deviceRow.modelData.active ? root.accent : root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-            }
-          }
-          }
-
-          Text {
-            width: parent.width
-            visible: root.service && root.service.devicesLoaded
-              && root.service.devices.length === 0
-            text: "No Spotify Connect devices are available right now. Make sure the device is online, then refresh."
-            color: root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          Item { width: 1; height: Style.space(4) }
-        }
-      }
-
-      FastScrollHandler {
-        parent: devicesScroll.contentItem
-        flickable: devicesScroll.contentItem
-      }
+    DevicesPage {
+      panel: root
     }
   }
 
   Component {
     id: loginPage
 
-    Item {
-      ScrollView {
-        id: loginScroll
-        anchors.fill: parent
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-        Column {
-          width: Math.min(Style.space(620), loginScroll.availableWidth)
-          x: Math.max(0, (loginScroll.availableWidth - width) / 2)
-          spacing: Style.space(14)
-
-          Item { width: 1; height: Style.space(4) }
-
-          Column {
-            width: parent.width
-            spacing: Style.space(5)
-
-            Text {
-              anchors.horizontalCenter: parent.horizontalCenter
-              text: ""
-              color: root.accent
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.displayLarge
-            }
-            Text {
-              width: parent.width
-              horizontalAlignment: Text.AlignHCenter
-              text: "Omarchy Spotify"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.title
-              font.bold: true
-            }
-            Text {
-              width: parent.width
-              horizontalAlignment: Text.AlignHCenter
-              text: "Your music, library, playlists, and Spotify Connect devices — at home in Omarchy."
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              wrapMode: Text.WordWrap
-            }
-          }
-
-          BorderSurface {
-            width: parent.width
-            implicitHeight: loginContent.implicitHeight + Style.space(28)
-            color: Style.normalFillFor(root.foreground, root.accent)
-            borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-            radius: Style.cornerRadius
-
-            Column {
-              id: loginContent
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.top: parent.top
-              anchors.margins: Style.space(14)
-              spacing: Style.space(12)
-
-              Row {
-                width: parent.width
-                spacing: Style.space(10)
-
-                BorderSurface {
-                  width: Style.space(34)
-                  height: width
-                  radius: width / 2
-                  color: root.fullyConnected
-                    ? Style.selectedFillFor(root.foreground, root.accent)
-                    : Style.normalFillFor(root.foreground, root.accent)
-                  borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: root.fullyConnected ? "󰄬" : ""
-                    color: root.fullyConnected ? root.accent : root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.icon
-                    font.bold: true
-                  }
-                }
-
-                Column {
-                  width: Math.max(40, parent.width - Style.space(44))
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(2)
-
-                  Text {
-                    text: root.connectionHeadline()
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.subtitle
-                    font.bold: true
-                  }
-                  Text {
-                    text: root.service ? root.service.loginProgress : "Spotify is unavailable"
-                    color: root.fullyConnected
-                      ? root.accent : root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-                }
-              }
-
-              Text {
-                width: parent.width
-                text: "Two short steps. First connect your Spotify account so you can browse. Then approve playback on this computer if you want to listen here."
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                wrapMode: Text.WordWrap
-              }
-
-              Column {
-                width: parent.width
-                spacing: Style.space(7)
-
-                Row {
-                  spacing: Style.space(7)
-                  Text {
-                    text: root.service && root.service.auth.loggedIn ? "󰄬" : "󰋼"
-                    color: root.service && root.service.auth.loggedIn
-                      ? root.accent : root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                  }
-                  Text {
-                    text: root.service && root.service.auth.loggedIn
-                      ? "Your Spotify account is connected"
-                      : (root.service && root.service.auth.loginBusy
-                        ? "Connecting your Spotify account…"
-                        : "Your Spotify account and library")
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                  }
-                }
-
-                Row {
-                  spacing: Style.space(7)
-                  Text {
-                    text: root.service && root.service.daemon.credentialsAvailable ? "󰄬" : "󰓃"
-                    color: root.service && root.service.daemon.credentialsAvailable
-                      ? root.accent : root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
-                  }
-                  Text {
-                    text: root.service && root.service.daemon.credentialsAvailable
-                      ? "Playback on this computer is connected"
-                      : (root.service && root.service.daemon.authenticationBusy
-                        ? "Connecting playback on this computer…"
-                        : "Playback on this computer")
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                  }
-                }
-              }
-
-              Row {
-                width: parent.width
-                spacing: Style.space(7)
-
-                Button {
-                  width: root.service && root.service.loginBusy
-                    ? Math.max(80, parent.width - cancelLoginButton.width
-                      - parent.spacing) : parent.width
-                  text: root.connectionButtonText()
-                  iconText: "󰍂"
-                  foreground: root.foreground
-                  selected: root.fullyConnected
-                  enabled: root.service && !root.fullyConnected && !root.service.loginBusy
-                  onClicked: if (root.service) root.service.login()
-                }
-
-                Button {
-                  id: cancelLoginButton
-                  text: "Cancel"
-                  foreground: root.foreground
-                  visible: root.service && root.service.loginBusy
-                  onClicked: if (root.service) root.service.cancelLogin()
-                }
-              }
-
-              Text {
-                width: parent.width
-                text: !root.service || root.service.daemon.playbackReady
-                  || root.service.daemon.setupBusy ? ""
-                  : (root.service.daemon.binaryAvailable
-                    ? "This prepares private, on-demand playback for your account."
-                    : "Omarchy may ask for your computer password to install its small playback component.")
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                wrapMode: Text.WordWrap
-                visible: text !== ""
-              }
-
-              Text {
-                width: parent.width
-                text: root.connectionErrorText()
-                color: Color.urgent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-                visible: text !== ""
-              }
-            }
-          }
-
-          Text {
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            text: "Your password is entered only on Spotify's own page. Omarchy Spotify never sees it."
-            color: root.muted
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
-          }
-
-          Item { width: 1; height: Style.space(4) }
-        }
-      }
-
-      FastScrollHandler {
-        parent: loginScroll.contentItem
-        flickable: loginScroll.contentItem
-      }
+    LoginPage {
+      panel: root
     }
   }
 
   Component {
     id: setupPage
 
-    Item {
-      ScrollView {
-        id: setupScroll
-        anchors.fill: parent
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-        Column {
-          width: setupScroll.availableWidth
-          spacing: Style.space(16)
-
-          Column {
-            width: parent.width
-            spacing: Style.space(7)
-
-            Text {
-              text: "SPOTIFY ACCOUNT"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
-            Text {
-              width: parent.width
-              text: "Connect Spotify to search, browse your library, manage playlists, and listen on this computer or another Spotify Connect device."
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              wrapMode: Text.WordWrap
-            }
-
-            BorderSurface {
-              width: parent.width
-              implicitHeight: accountStatus.implicitHeight + Style.space(16)
-              color: Style.normalFillFor(root.foreground, root.accent)
-              borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-              radius: Style.cornerRadius
-
-              Text {
-                id: accountStatus
-                anchors.fill: parent
-                anchors.margins: Style.space(8)
-                text: !root.service ? "Spotify is unavailable"
-                  : (root.service.loginBusy ? root.service.loginProgress + "…"
-                  : (root.fullyConnected ? "Connected and ready to play"
-                  : (root.service.auth.loggedIn
-                    ? "Spotify is connected · playback needs approval"
-                    : (root.service.daemon.credentialsAvailable
-                      ? "Playback is ready · Spotify needs approval"
-                      : "Not connected"))))
-                color: root.fullyConnected ? root.accent : root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                wrapMode: Text.WordWrap
-              }
-            }
-
-            Row {
-              spacing: Style.space(7)
-
-              Button {
-                text: root.connectionButtonText()
-                iconText: "󰍂"
-                foreground: root.foreground
-                selected: root.fullyConnected
-                visible: !root.fullyConnected
-                enabled: root.service && !root.service.loginBusy
-                onClicked: if (root.service) root.service.login()
-              }
-              Button {
-                text: "Cancel"
-                foreground: root.foreground
-                visible: root.service && root.service.loginBusy
-                onClicked: if (root.service) root.service.cancelLogin()
-              }
-              Button {
-                text: "Reconnect Spotify"
-                iconText: "󰑐"
-                foreground: root.foreground
-                visible: root.service && root.service.auth.loggedIn
-                enabled: root.service && !root.service.loginBusy
-                tooltipText: "Reconnect if library or playlist features are not working"
-                onClicked: root.service.reconnectAccount()
-              }
-              Button {
-                text: "Log out"
-                iconText: "󰍃"
-                foreground: root.foreground
-                visible: root.service && (root.service.auth.loggedIn
-                  || root.service.daemon.credentialsAvailable)
-                enabled: root.service && !root.service.loginBusy
-                  && !root.service.daemon.busy
-                onClicked: root.service.logout()
-              }
-            }
-
-            Text {
-              width: parent.width
-              text: root.connectionErrorText()
-              color: Color.urgent
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              wrapMode: Text.WordWrap
-              visible: text !== ""
-            }
-          }
-
-          PanelSeparator { foreground: root.foreground }
-
-          Column {
-            id: localPlaybackSetup
-            width: parent.width
-            spacing: Style.space(7)
-            visible: root.service && !root.service.daemon.playbackReady
-
-            Text {
-              text: "PLAYBACK ON THIS COMPUTER"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
-            Text {
-              width: parent.width
-              text: "A lightweight background player starts only when you need it, works with Omarchy's media controls, and appears in Spotify Connect as this computer."
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              wrapMode: Text.WordWrap
-            }
-
-            BorderSurface {
-              width: parent.width
-              implicitHeight: engineStatus.implicitHeight + Style.space(16)
-              color: Style.normalFillFor(root.foreground, root.accent)
-              borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-              radius: Style.cornerRadius
-
-              Text {
-                id: engineStatus
-                anchors.fill: parent
-                anchors.margins: Style.space(8)
-                text: root.playbackStatusText()
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                wrapMode: Text.WordWrap
-              }
-            }
-
-            Row {
-              spacing: Style.space(7)
-
-              Button {
-                text: root.service && root.service.daemon.setupBusy
-                  ? "Setting up playback…" : "Set up playback"
-                iconText: "󰓃"
-                foreground: root.foreground
-                visible: root.service && !root.service.daemon.playbackReady
-                enabled: root.service && !root.service.loginBusy
-                onClicked: root.service.login()
-              }
-            }
-          }
-
-          PanelSeparator {
-            foreground: root.foreground
-            visible: localPlaybackSetup.visible
-          }
-
-          Column {
-            width: parent.width
-            spacing: Style.space(7)
-
-            Text {
-              text: "PREFERENCES"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
-
-            Text {
-              text: "SPOTIFY CONNECT"
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
-
-            Row {
-              width: parent.width
-              spacing: Style.space(8)
-
-              Column {
-                width: Math.round(parent.width * 0.58)
-                spacing: Style.space(4)
-
-                Text {
-                  text: "THIS COMPUTER APPEARS AS"
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                }
-                TextField {
-                  width: parent.width
-                  foreground: root.foreground
-                  placeholderText: "Omarchy Spotify"
-                  text: root.draftDeviceName
-                  onTextEdited: root.draftDeviceName = text
-                  onEditingFinished: root.persistDraftSettings()
-                }
-              }
-              Column {
-                width: Math.max(Style.space(150), parent.width - Math.round(parent.width * 0.58)
-                  - parent.spacing)
-                spacing: Style.space(4)
-
-                Text {
-                  text: "STOP WHEN IDLE · MINUTES"
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                }
-                TextField {
-                  width: parent.width
-                  foreground: root.foreground
-                  placeholderText: "15"
-                  text: root.draftIdleMinutes
-                  validator: IntValidator { bottom: 0; top: 1440 }
-                  onTextEdited: root.draftIdleMinutes = text
-                  onEditingFinished: root.persistDraftSettings()
-                }
-              }
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(6)
-
-              Text {
-                text: "BAR PLAYER"
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              Button {
-                text: "Mini-player first · "
-                  + (root.draftShowMiniPlayer ? "On" : "Off")
-                iconText: "󰍹"
-                foreground: root.foreground
-                selected: root.draftShowMiniPlayer
-                tooltipText: root.draftShowMiniPlayer
-                  ? "Clicking the bar icon opens the mini-player first"
-                  : "Clicking the bar icon opens the full player directly"
-                onClicked: {
-                  root.draftShowMiniPlayer = !root.draftShowMiniPlayer
-                  root.persistDraftSettings()
-                }
-              }
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(6)
-
-              Text {
-                text: "KEYBOARD"
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              Button {
-                text: "Super + Shift + M · " + root.draftShortcutPlayer
-                iconText: "󰌌"
-                foreground: root.foreground
-                selected: root.draftShortcutPlayer !== "Omarchy Music app"
-                focusable: true
-                tooltipText: "Cycle between Omarchy's Music app, full player, and mini-player"
-                onClicked: root.cycleShortcutPlayer()
-              }
-
-              Text {
-                width: parent.width
-                text: "Cycles Omarchy Music app → Full player → Mini player. Super+Shift+M then opens that target."
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
-
-              Button {
-                text: "Shortcut hints · "
-                  + (root.draftShortcutHints ? "On" : "Off")
-                iconText: "󰘳"
-                foreground: root.foreground
-                selected: root.draftShortcutHints
-                tooltipText: root.draftShortcutHints
-                  ? "The first shortcut lights matching controls with the next key"
-                  : "Shortcuts still work, without the on-control overlay"
-                onClicked: {
-                  root.draftShortcutHints = !root.draftShortcutHints
-                  root.persistDraftSettings()
-                }
-              }
-
-              Text {
-                width: parent.width
-                text: "After a shortcut or Tab, matching buttons glow and show the next key. Hold Ctrl, Shift, or Alt to see those chords, or press Ctrl+H to turn them off. Turn them on here again whenever you want the overlay back."
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(6)
-
-              Text {
-                text: "BAR TEXT"
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              Flow {
-                width: parent.width
-                spacing: Style.space(8)
-
-                Button {
-                  text: "Title · " + (root.draftShowTitle ? "On" : "Off")
-                  foreground: root.foreground
-                  selected: root.draftShowTitle
-                  tooltipText: "Show the song title in the top bar"
-                  onClicked: {
-                    root.draftShowTitle = !root.draftShowTitle
-                    root.enforceScrollAvailability()
-                    root.persistDraftSettings()
-                  }
-                }
-                Button {
-                  text: "Artist · " + (root.draftShowArtist ? "On" : "Off")
-                  foreground: root.foreground
-                  selected: root.draftShowArtist
-                  tooltipText: "Show the artist name in the top bar"
-                  onClicked: {
-                    root.draftShowArtist = !root.draftShowArtist
-                    root.enforceScrollAvailability()
-                    root.persistDraftSettings()
-                  }
-                }
-                Button {
-                  text: "While paused · "
-                    + (root.draftShowPausedTrack ? "Show" : "Hide")
-                  foreground: root.foreground
-                  selected: root.draftShowPausedTrack
-                  tooltipText: root.draftShowPausedTrack
-                    ? "Keep the configured title and artist visible while paused"
-                    : "Show only the Spotify icon while paused"
-                  onClicked: {
-                    root.draftShowPausedTrack = !root.draftShowPausedTrack
-                    root.persistDraftSettings()
-                  }
-                }
-                Button {
-                  text: "Scroll overflow · " + (root.draftScrollBarText ? "On" : "Off")
-                  foreground: root.foreground
-                  selected: root.draftScrollBarText
-                  enabled: Api.canScrollBarText(root.draftShowTitle, root.draftShowArtist)
-                    && !root.barTextWidthUnlimited
-                  tooltipText: root.barTextWidthUnlimited
-                    ? "Unavailable while the bar width is unlimited — the label always fits"
-                    : "Scroll bar text only when it is too wide to fit"
-                  onClicked: {
-                    root.draftScrollBarText = !root.draftScrollBarText
-                    root.persistDraftSettings()
-                  }
-                }
-                // Discloses the width slider rather than changing a setting;
-                // the selected highlight marks the open state.
-                Button {
-                  text: "Width · " + root.maxBarTextWidthLabel()
-                  foreground: root.foreground
-                  selected: root.barTextWidthExpanded
-                  enabled: Api.canScrollBarText(root.draftShowTitle, root.draftShowArtist)
-                  tooltipText: "How wide the bar label may grow"
-                  onClicked: root.barTextWidthExpanded = !root.barTextWidthExpanded
-                }
-              }
-
-              Column {
-                width: parent.width
-                spacing: Style.space(4)
-                visible: Api.canScrollBarText(root.draftShowTitle, root.draftShowArtist)
-                  && root.draftScrollBarText
-
-                Row {
-                  width: parent.width
-
-                  Text {
-                    id: scrollSpeedTitle
-                    text: "SCROLL SPEED"
-                    color: root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                  }
-                  Item {
-                    width: Math.max(0, parent.width - scrollSpeedTitle.implicitWidth
-                      - scrollSpeedValue.implicitWidth)
-                    height: 1
-                  }
-                  Text {
-                    id: scrollSpeedValue
-                    text: root.scrollSpeedLabel()
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    font.bold: true
-                  }
-                }
-
-                PanelSlider {
-                  width: parent.width
-                  bar: root.panelBar
-                  minimum: 0.25
-                  maximum: 3
-                  step: 0.25
-                  tickCount: 12
-                  value: root.draftScrollSpeed
-                  onMoved: function(value) {
-                    root.draftScrollSpeed = Api.normalizedScrollSpeed(value)
-                  }
-                  onReleased: function(value) {
-                    root.draftScrollSpeed = Api.normalizedScrollSpeed(value)
-                    root.persistDraftSettings()
-                  }
-                }
-              }
-
-              Column {
-                width: parent.width
-                spacing: Style.space(4)
-                visible: Api.canScrollBarText(root.draftShowTitle, root.draftShowArtist)
-                  && root.barTextWidthExpanded
-
-                Row {
-                  width: parent.width
-
-                  Text {
-                    id: maxBarWidthTitle
-                    text: "MAX WIDTH"
-                    color: root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                  }
-                  Item {
-                    width: Math.max(0, parent.width - maxBarWidthTitle.implicitWidth
-                      - maxBarWidthValue.implicitWidth)
-                    height: 1
-                  }
-                  Text {
-                    id: maxBarWidthValue
-                    text: root.maxBarTextWidthLabel()
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    font.bold: true
-                  }
-                }
-
-                PanelSlider {
-                  width: parent.width
-                  bar: root.panelBar
-                  minimum: root.barTextWidthSlider.min
-                  maximum: root.barTextWidthSlider.unlimited
-                  step: root.barTextWidthSlider.step
-                  tickCount: root.barTextWidthSlider.ticks
-                  value: root.maxBarTextWidthSliderValue()
-                  onMoved: function(value) {
-                    root.setMaxBarTextWidthFromSlider(value)
-                  }
-                  onReleased: function(value) {
-                    root.setMaxBarTextWidthFromSlider(value)
-                    root.persistDraftSettings()
-                  }
-                }
-
-                Text {
-                  width: parent.width
-                  visible: root.barTextWidthUnlimited
-                  text: "Very long titles will take space from other bar widgets."
-                  color: root.muted
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  wrapMode: Text.WordWrap
-                }
-              }
-
-              Text {
-                width: parent.width
-                visible: root.draftScrollBarText
-                text: "Long labels scroll and fade at the edges only when they exceed the available bar space."
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(6)
-
-              Text {
-                text: "PLAYBACK"
-                color: root.muted
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: true
-              }
-
-              Button {
-                text: "Audio quality · " + root.audioQualityLabel()
-                iconText: "󰎈"
-                foreground: root.foreground
-                tooltipText: "Change streaming quality"
-                onClicked: root.cycleAudioQuality()
-              }
-            }
-
-            Text {
-              width: parent.width
-              text: "This computer stays visible in Spotify Connect while the player is open. After it closes, an empty receiver sleeps at the idle timeout; paused media stays available to resume. Use 0 minutes to keep this computer available even while the player is closed. Device name and audio quality changes apply the next time local playback starts."
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              wrapMode: Text.WordWrap
-            }
-
-            Text {
-              width: parent.width
-              text: "Changes apply immediately. Device name and audio quality update the next time local playback starts."
-              color: root.muted
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-              wrapMode: Text.WordWrap
-            }
-          }
-        }
-      }
-
-      FastScrollHandler {
-        parent: setupScroll.contentItem
-        flickable: setupScroll.contentItem
-      }
+    SettingsPage {
+      panel: root
     }
   }
 }

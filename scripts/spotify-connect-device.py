@@ -67,7 +67,7 @@ def receiver_cache_path() -> Path:
     runtime = str(os.environ.get("XDG_RUNTIME_DIR") or "")
     if not runtime.startswith("/"):
         raise ConnectError("invalid runtime directory")
-    return Path(runtime) / "omarchy-spotify" / "connect-receivers.json"
+    return Path(runtime) / "omaspotify" / "connect-receivers.json"
 
 
 def write_receiver_cache(devices: list[dict[str, Any]]) -> None:
@@ -392,7 +392,7 @@ def credentials_paths() -> list[Path]:
     cache_root = os.environ.get("XDG_CACHE_HOME")
     if not cache_root:
         cache_root = str(Path.home() / ".cache")
-    durable = Path(state_root) / "omarchy-spotify"
+    durable = Path(state_root) / "omaspotify"
     legacy = Path(cache_root) / "spotifyd"
     return [
         durable / "oauth" / "credentials.json",
@@ -673,7 +673,7 @@ def activate_receiver(device_id: str, access_token: str = "") -> dict[str, Any]:
     info = request_json_with_retry(
         receiver["address"], receiver["port"], f'{receiver["cpath"]}?{info_query}'
     )
-    origin_name = "Omarchy Spotify"
+    origin_name = "OmaSpotify"
     token_type = str(
         info.get("tokenType") or receiver.get("tokenType") or "default"
     ).strip().lower()
