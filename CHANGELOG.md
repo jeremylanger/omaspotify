@@ -96,3 +96,7 @@ Changes below start from the fork point. For the history of the original plugin,
   the playlist picker leaving the keyboard nowhere when it closed.
 - A normalisation setting sent without its pregain is refused rather than
   quietly dropped.
+- Every screenshot in the README is retaken on the current design, and there
+  are three more of them: Your listening, Now playing, and For you. The
+  shortcut-hint recording is now a still of the same thing, which is a tenth
+  of the size.

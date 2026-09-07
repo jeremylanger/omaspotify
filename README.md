@@ -65,7 +65,7 @@ chords; the matching hints remain until you release the held modifiers. While
 hints are visible, the header keeps a **Ctrl+H · Hide hints** action in reach.
 It turns hints off until you enable them again in Settings.
 
-![Shortcut hints guiding focus down the Recently played song list](docs/media/shortcut-hints.gif)
+![Shortcut hints lighting up the sidebar, search and transport on the For you page](docs/screenshots/shortcut-hints.png)
 
 The mini-player takes keyboard focus when it is opened from a shortcut. Use
 `Tab` or the arrow keys to select every control, `Enter` to activate buttons,
@@ -79,29 +79,51 @@ current artist or album in the full player, and `O` expands the full player.
 ### Your playlists, instantly familiar
 
 Everything is where you expect it to be—just faster, lighter, and dressed in
-your Omarchy theme.
+your Omarchy theme. Your whole library lives in the sidebar: playlists,
+albums, artists and podcasts together, sorted however you like.
 
-![Vietnam War Music playlist in OmaSpotify](docs/screenshots/vietnam-war-playlist.png)
+![The Ambient Space Soundscapes playlist open in OmaSpotify](docs/screenshots/library-playlist.png)
 
 ### Everything from an artist, in one view
 
-Top albums and EPs sit beside the artist's ten biggest songs, with their
-**This Is** playlist and full catalog only a search away.
+Followers and genres, top albums and EPs, the artist's ten biggest songs, every
+liked song you already have by them, and who else they sit next to—one page, no
+digging.
 
-![Red Hot Chili Peppers artist page with Under the Bridge playing](docs/screenshots/red-hot-chili-peppers-under-the-bridge.png)
+![The Lane 8 artist page, with top releases, top songs and liked songs side by side](docs/screenshots/artist-page.png)
 
-### Lyrics, already matched to the song
+### What you actually listened to
 
-One click sends the current track to Omasing, where the lyrics are fetched and
-lined up with your playback position—ready to auto-scroll as you listen.
+Spotify keeps your last fifty plays and shows you none of it. OmaSpotify keeps
+its own record from the day you install it, so the heatmap fills in as you
+listen, and top artists and songs sit underneath it across three ranges.
 
-![OmaSpotify beside Omasing lyrics for Under the Bridge](docs/screenshots/omasing-lyrics-under-the-bridge.png)
+![The Your listening screen: a day-by-day heatmap above top artists and top songs](docs/screenshots/your-listening.png)
+
+### The song, full size
+
+`Alt+Shift+N` gives the current track the whole window—artwork, title, and the
+scrubber, nothing else.
+
+![The Now playing screen showing full-size album artwork](docs/screenshots/now-playing.png)
+
+### Everything you were just listening to
+
+Recently played, your top songs and artists, and new releases from the artists
+you follow—each one a tab away.
+
+![The For you screen listing recently played songs](docs/screenshots/for-you.png)
 
 ### A mini player that belongs in your desktop
 
 The essentials are always one click away, without reopening the full app.
 
-![OmaSpotify mini player playing Under the Bridge](docs/screenshots/mini-player-under-the-bridge.png)
+![The OmaSpotify mini player over the desktop](docs/screenshots/mini-player.png)
+
+### Lyrics, already matched to the song
+
+One click sends the current track to Omasing, where the lyrics are fetched and
+lined up with your playback position—ready to auto-scroll as you listen.
 
 ## Set it up
 
