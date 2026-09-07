@@ -3771,13 +3771,13 @@ Item {
                 spacing: Style.space(4)
                 visible: root.service && root.service.playbackDeviceName !== ""
 
-                // Bounded so a long device name elides instead of running
-                // out past the row.
+                // As wide as the name, up to what the row has left, so a
+                // long name elides instead of running past the row and a
+                // short one keeps the icon beside it.
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
-                  width: Math.max(0, parent.width - deviceGlyph.width
-                    - parent.spacing)
-                  horizontalAlignment: Text.AlignRight
+                  width: Math.min(implicitWidth,
+                    Math.max(0, parent.width - deviceGlyph.width - parent.spacing))
                   text: root.service ? root.service.playbackDeviceName : ""
                   color: root.muted
                   font.family: root.fontFamily

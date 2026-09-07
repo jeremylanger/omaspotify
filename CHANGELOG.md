@@ -84,7 +84,8 @@ Changes below start from the fork point. For the history of the original plugin,
   shell command out of an environment variable.
 - The artist endpoints no longer send `market=from_token`, which is not a
   country code Spotify accepts. It uses the signed-in account's country.
-- Fixed the playback device name overflowing its row instead of eliding.
+- Fixed the playback device name overflowing its row instead of eliding,
+  without pushing its icon away from it.
 - Fixed the keyboard shortcut hint failing to read its fallback colours, and
   the playlist picker leaving the keyboard nowhere when it closed.
 - A normalisation setting sent without its pregain is refused rather than
