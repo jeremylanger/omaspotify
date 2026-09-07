@@ -283,8 +283,45 @@ TestCase {
   function test_librarySort_recentUsesPlayTimesThenLibraryOrder() {
     var played = { "spotify:artist:c": 900, "spotify:playlist:b": 100 }
     var out = Api.sortedLibraryItems(sortFixture, "recent", played, [])
+    compare([out[0].name, out[1].name],
+      ["alpha", "Gamma"], "a newer save outranks an older play")
+  }
+
+  // Spotify's own Recents is last-touched, not last-played: a freshly saved
+  // album outranks a playlist played a while ago. Rank on whichever is newer.
+  function test_librarySort_recentTreatsSavingAsInteraction() {
+    var items = [
+      { uri: "u:played", name: "Played", addedAt: 0 },
+      { uri: "u:saved", name: "Saved", addedAt: 5000 },
+      { uri: "u:stale", name: "Stale" }
+    ]
+    var out = Api.sortedLibraryItems(items, "recent", { "u:played": 1000 }, [])
     compare([out[0].name, out[1].name, out[2].name],
-      ["Gamma", "Beta", "alpha"])
+      ["Saved", "Played", "Stale"])
+  }
+
+  // The service stores added_at exactly as Spotify sends it, an ISO string,
+  // so the sort has to parse rather than assume a number.
+  function test_librarySort_understandsIsoAddedDates() {
+    var items = [
+      { uri: "u:old", name: "Older", addedAt: "2026-08-10T00:00:00Z" },
+      { uri: "u:new", name: "Newer", addedAt: "2026-09-06T19:06:40Z" },
+      { uri: "u:none", name: "Undated", addedAt: "" }
+    ]
+    var byAdded = Api.sortedLibraryItems(items, "added", ({}), [])
+    compare([byAdded[0].name, byAdded[1].name, byAdded[2].name],
+      ["Newer", "Older", "Undated"])
+    var byRecent = Api.sortedLibraryItems(items, "recent", ({}), [])
+    compare([byRecent[0].name, byRecent[1].name], ["Newer", "Older"])
+  }
+
+  function test_librarySort_recentPrefersAPlayOverAnOlderSave() {
+    var items = [
+      { uri: "u:a", name: "Saved long ago", addedAt: 100 },
+      { uri: "u:b", name: "Played just now", addedAt: 50 }
+    ]
+    var out = Api.sortedLibraryItems(items, "recent", { "u:b": 9000 }, [])
+    compare([out[0].name, out[1].name], ["Played just now", "Saved long ago"])
   }
 
   function test_librarySort_pinnedItemsComeFirstInPinOrder() {

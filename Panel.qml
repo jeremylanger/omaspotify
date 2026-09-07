@@ -2024,7 +2024,7 @@ Item {
 
   function librarySortLabel() {
     var mode = service ? service.librarySort : "library"
-    if (mode === "recent") return "Recently played"
+    if (mode === "recent") return "Recents"
     if (mode === "added") return "Recently added"
     if (mode === "alpha") return "Alphabetical"
     return "Library order"

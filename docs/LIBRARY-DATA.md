@@ -86,6 +86,28 @@ both exist in the schema. It is deliberately not used:
 The probe was removed after this research. To repeat it, add a hidden subcommand
 that calls `session.spclient().get_rootlist(0, Some(200))` and dump the bytes.
 
+## What Spotify's own "Recents" actually is
+
+Compared our sidebar against the native client's Recents list on the same
+account. Native's order after its four pinned rows was: Ambient Cinematic
+(playlist), The Dark Wizard, Baekdudaegan, Prehistoric Planet, Ashley, Owen,
+The Outrun, Everlight — almost entirely **albums**, and their `added_at` dates
+line up with that order.
+
+So Spotify's Recents is **last touched, not last played**: saving an album counts
+as an interaction. Ranking only on plays left the top of the list filled with
+long-standing playlists, which was the visible bug. The sort now takes whichever
+is newer, a play time or the save time.
+
+Two gaps remain, both from the 50-play ceiling:
+
+- A playlist played recently but saved long ago can still rank below a freshly
+  saved album, because its play may have fallen outside the 50-play window
+- Native put Prehistoric Planet above Ashley and Owen despite an older save date,
+  so it knows that album was played more recently than we can see
+
+Closing either would need play history deeper than Spotify exposes.
+
 ## What this means for sorting
 
 - **Library order** (default) — free, and matches Spotify

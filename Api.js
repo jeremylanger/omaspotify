@@ -445,6 +445,16 @@ function normalizedLibraryView(value) {
 // follow the chosen mode. Items the mode cannot rank — a playlist has no added
 // date, an artist never played has no play time — keep Spotify's order at the
 // bottom rather than being interleaved as though they were oldest.
+// added_at arrives as an ISO string from Spotify but a play time is already a
+// number, so accept either.
+function libraryTimestamp(value) {
+  if (value === null || value === undefined || value === "") return 0
+  var numeric = Number(value)
+  if (isFinite(numeric) && numeric > 0) return numeric
+  var parsed = Date.parse(String(value))
+  return isFinite(parsed) ? parsed : 0
+}
+
 function sortedLibraryItems(items, mode, playedAt, pinned) {
   var source = Array.isArray(items) ? items : []
   var order = normalizedLibrarySort(mode)
@@ -462,8 +472,8 @@ function sortedLibraryItems(items, mode, playedAt, pinned) {
       uri: uri,
       pinRank: pins.indexOf(uri),
       name: String(item.name || "").toLowerCase(),
-      addedAt: Number(item.addedAt),
-      playedAt: Number(plays[uri])
+      addedAt: libraryTimestamp(item.addedAt),
+      playedAt: libraryTimestamp(plays[uri])
     })
   }
 
@@ -487,7 +497,12 @@ function sortedLibraryItems(items, mode, playedAt, pinned) {
       return a.index - b.index
     }
     if (order === "added") return rankedFirst(a, b, function(v) { return v.addedAt })
-    if (order === "recent") return rankedFirst(a, b, function(v) { return v.playedAt })
+    // Recents means last touched, the way Spotify's own list behaves: saving an
+    // album counts just as much as playing something.
+    if (order === "recent") return rankedFirst(a, b, function(v) {
+      return Math.max(isFinite(v.playedAt) ? v.playedAt : 0,
+        isFinite(v.addedAt) ? v.addedAt : 0)
+    })
     return a.index - b.index
   })
 
