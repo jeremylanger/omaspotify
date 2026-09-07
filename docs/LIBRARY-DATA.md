@@ -122,6 +122,18 @@ together. The rank measures how much something was played rather than when, so
 the whole estimated range sits at least a week back — real plays and fresh saves
 still lead it.
 
+Two bugs found by comparing against the native client, both worth remembering:
+
+- **Sorting a partly loaded library puts the wrong things on top and hides the
+  rest.** The sidebar fetched one page per collection and sorted that. Release
+  Radar sits at index 31 of 107 playlists, so it was never loaded at all — it
+  appeared only after scrolling paged more in. The sidebar now pages every
+  collection to completion before the sort means anything
+- **The play times only arrived via the Home tab.** `recentContextPlays` was
+  filled by `loadHome()`, so opening straight to the library left the Recents
+  sort with no play data whatsoever. The sidebar now fetches recently-played
+  itself
+
 **Playlists remain the weak spot.** Spotify's top lists cover tracks and artists
 only, so a playlist gets a date solely from the 50-play window. Beyond that it
 has nothing: no save date, no listening signal. Playlists you have not played in

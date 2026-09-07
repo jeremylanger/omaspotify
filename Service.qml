@@ -1082,10 +1082,36 @@ Item {
 
   function loadSidebarPlaylists() {
     loadRecentListening()
-    if (!playlistsLoaded && !playlistsLoading) loadPlaylists(false)
-    if (!savedAlbumsLoaded && !savedAlbumsLoading) loadSavedAlbums(false)
-    if (!followedArtistsLoaded && !followedArtistsLoading) loadFollowedArtists(false)
-    if (!savedShowsLoaded && !savedShowsLoading) loadSavedShows(false)
+    fillSidebarCollection("playlists")
+    fillSidebarCollection("albums")
+    fillSidebarCollection("artists")
+    fillSidebarCollection("shows")
+  }
+
+  // Keep paging until the collection is complete. Sorting half a library puts
+  // the wrong things on top and hides the rest entirely.
+  function fillSidebarCollection(kind) {
+    var spec = libraryCollectionSpec(kind)
+    if (root[spec.loading]) return
+    var more = root[spec.loaded] && root[spec.next] !== ""
+    if (!root[spec.loaded]) {
+      loadLibraryCollection(kind, false, function() {
+        root.continueSidebarCollection(kind, 1)
+      })
+      return
+    }
+    if (more) continueSidebarCollection(kind, 1)
+  }
+
+  function continueSidebarCollection(kind, depth) {
+    // 12 pages of 50 is far more library than anyone has; the guard just stops
+    // a broken cursor from looping forever.
+    if (depth > 12) return
+    var spec = libraryCollectionSpec(kind)
+    if (!root[spec.next] || root[spec.loading]) return
+    loadLibraryCollection(kind, true, function() {
+      root.continueSidebarCollection(kind, depth + 1)
+    })
   }
 
   function loadProfile() {
@@ -1169,13 +1195,19 @@ Item {
     if (recentListeningLoading || recentListeningLoaded) return
     recentListeningLoading = true
     var expected = dataSerial
-    var pending = 2
+    var pending = 3
     var settle = function() {
       pending--
       if (pending > 0) return
       root.recentListeningLoading = false
       root.recentListeningLoaded = true
     }
+    spotifyApi.request("GET", "/me/player/recently-played", { limit: 50 }, null,
+      function(status, payload, error) {
+        if (expected !== root.dataSerial) return
+        if (!error) root.recentContextPlays = Api.recentContextPlayTimes(payload)
+        settle()
+      })
     spotifyApi.request("GET", "/me/top/tracks",
       { limit: 50, time_range: "short_term" }, null,
       function(status, payload, error) {
@@ -1283,28 +1315,28 @@ Item {
       return {
         items: "playlists", next: "playlistsNext",
         loading: "playlistsLoading", loaded: "playlistsLoaded",
-        path: "/me/playlists", query: { limit: 30 },
+        path: "/me/playlists", query: { limit: 50 },
         mapper: "playlist", cursor: false, checkSaved: true, mergeDiscover: true
       }
     if (value === "albums")
       return {
         items: "savedAlbums", next: "savedAlbumsNext",
         loading: "savedAlbumsLoading", loaded: "savedAlbumsLoaded",
-        path: "/me/albums", query: { limit: 30 },
+        path: "/me/albums", query: { limit: 50 },
         mapper: "context", cursor: false
       }
     if (value === "artists")
       return {
         items: "followedArtists", next: "followedArtistsNext",
         loading: "followedArtistsLoading", loaded: "followedArtistsLoaded",
-        path: "/me/following", query: { type: "artist", limit: 30 },
+        path: "/me/following", query: { type: "artist", limit: 50 },
         mapper: "context", cursor: true
       }
     if (value === "shows")
       return {
         items: "savedShows", next: "savedShowsNext",
         loading: "savedShowsLoading", loaded: "savedShowsLoaded",
-        path: "/me/shows", query: { limit: 30 },
+        path: "/me/shows", query: { limit: 50 },
         mapper: "context", cursor: false
       }
     if (value === "episodes")
