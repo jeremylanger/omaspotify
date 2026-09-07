@@ -12,7 +12,8 @@ Changes below start from the fork point. For the history of the original plugin,
 - Lint every source file by glob so a new one is never missed.
 - Run the test suite in CI on every push and pull request. CI installs the
   QtQuick modules that `--no-install-recommends` was leaving out, without which
-  no QML test could compile at all.
+  no QML test could compile at all, and the three commands `setup.sh` checks
+  for that a bare runner does not have.
 - Follower counts are grouped from their digits rather than from whatever the
   engine hands back, which on some builds is already grouped: 1,200 followers
   came out as "1,,200".
