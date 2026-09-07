@@ -430,18 +430,28 @@ function recentContextPlayTimes(payload) {
 function recentListenWindow(topTracks, topArtists, nowMs, windowDays) {
   var now = Number(nowMs) || 0
   var days = Math.max(1, Number(windowDays) || 28)
-  var edge = now - days * 24 * 3600 * 1000
+  var day = 24 * 3600 * 1000
+  // The rank says how much something was played, not when, so the whole range
+  // sits at least a week back: fresh saves and real plays still lead.
+  var newest = now - 7 * day
+  var oldest = now - days * day
+
   var times = {}
+  function place(uri, rank, total) {
+    if (!uri) return
+    var span = Math.max(1, total - 1)
+    var at = newest - (newest - oldest) * (Math.min(rank, span) / span)
+    if (!times.hasOwnProperty(uri) || at > times[uri]) times[uri] = at
+  }
+
   var tracks = topTracks && Array.isArray(topTracks.items) ? topTracks.items : []
   for (var i = 0; i < tracks.length; i++) {
     var album = tracks[i] && tracks[i].album
-    var albumUri = album ? String(album.uri || "") : ""
-    if (albumUri) times[albumUri] = edge
+    place(album ? String(album.uri || "") : "", i, tracks.length)
   }
   var artists = topArtists && Array.isArray(topArtists.items) ? topArtists.items : []
   for (var j = 0; j < artists.length; j++) {
-    var artistUri = artists[j] ? String(artists[j].uri || "") : ""
-    if (artistUri) times[artistUri] = edge
+    place(artists[j] ? String(artists[j].uri || "") : "", j, artists.length)
   }
   return times
 }

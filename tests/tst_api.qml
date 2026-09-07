@@ -236,14 +236,42 @@ TestCase {
   // reveal what has actually been listened to over roughly four weeks. Those
   // count as a play inside that window, dated at the far edge of it so a
   // genuinely newer save still wins.
-  function test_recentListenWindow_datesTopItemsAtTheEdgeOfTheWindow() {
-    var now = 1000000000
-    var windowMs = 28 * 24 * 3600 * 1000
+  // Every top-list item used to get the same timestamp, so they all tied and
+  // fell back to library order — which visibly clumped artists together. Spread
+  // them across the window by rank so they interleave with dated items.
+  function test_recentListenWindow_spreadsItemsByRank() {
+    var now = 100000000000
     var out = Api.recentListenWindow({
-      items: [{ album: { uri: "spotify:album:x" } }]
-    }, { items: [{ uri: "spotify:artist:y" }] }, now, 28)
-    compare(out["spotify:album:x"], now - windowMs)
-    compare(out["spotify:artist:y"], now - windowMs)
+      items: [
+        { album: { uri: "spotify:album:first" } },
+        { album: { uri: "spotify:album:second" } },
+        { album: { uri: "spotify:album:third" } }
+      ]
+    }, null, now, 28)
+    verify(out["spotify:album:first"] > out["spotify:album:second"],
+      "a higher ranked album reads as more recent")
+    verify(out["spotify:album:second"] > out["spotify:album:third"])
+  }
+
+  // Even the top of the list stays below genuinely fresh activity, because the
+  // rank tells us how much something was played, not exactly when.
+  function test_recentListenWindow_staysBelowTodaysActivity() {
+    var now = 100000000000
+    var day = 24 * 3600 * 1000
+    var out = Api.recentListenWindow({
+      items: [{ album: { uri: "spotify:album:top" } }]
+    }, null, now, 28)
+    verify(out["spotify:album:top"] <= now - 7 * day,
+      "the freshest listening signal is still at least a week old")
+    verify(out["spotify:album:top"] >= now - 28 * day)
+  }
+
+  function test_recentListenWindow_rankBothTracksAndArtists() {
+    var out = Api.recentListenWindow(
+      { items: [{ album: { uri: "spotify:album:a" } }] },
+      { items: [{ uri: "spotify:artist:b" }] }, 100000000000, 28)
+    verify(out["spotify:album:a"] > 0)
+    verify(out["spotify:artist:b"] > 0)
   }
 
   function test_recentListenWindow_toleratesJunk() {

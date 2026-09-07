@@ -115,6 +115,18 @@ enough to lift it above older saves, without inventing a precise moment.
 Measured effect: "Everlight", saved eleven months ago but in current top tracks,
 moved from roughly 40th to 12th. The native client places it 8th.
 
+The rank within those top lists spreads the estimate across the window rather
+than stamping everything at one instant. A flat stamp made every top-list item
+tie, and ties fall back to library order, which visibly clumped all the artists
+together. The rank measures how much something was played rather than when, so
+the whole estimated range sits at least a week back — real plays and fresh saves
+still lead it.
+
+**Playlists remain the weak spot.** Spotify's top lists cover tracks and artists
+only, so a playlist gets a date solely from the 50-play window. Beyond that it
+has nothing: no save date, no listening signal. Playlists you have not played in
+the last day or two will sink, and no endpoint fixes it.
+
 What still differs, and why it cannot be fixed: the native client knows the exact
 last play of everything. We know exact times for 50 plays, a four-week yes/no for
 the rest, and nothing at all beyond that. So an album saved three weeks ago and
