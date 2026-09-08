@@ -422,6 +422,27 @@ TestCase {
     verify(!Api.jobMayRunDuringCooldown(null, false))
   }
 
+  // A refusal aimed at the library crawl must not freeze the page someone just
+  // opened. Only their own request being refused holds them back.
+  function test_apiCooldown_keepsBackgroundRefusalsOffTheOpenPage() {
+    var opened = { method: "GET", priority: "interactive" }
+    var crawl = { method: "GET", priority: "background" }
+    var poll = { method: "GET" }
+    var save = { method: "PUT" }
+
+    compare(Api.jobCooldownMs(opened, 1000, 20000, 0), 0,
+      "the page someone opened goes now")
+    compare(Api.jobCooldownMs(save, 1000, 20000, 0), 0,
+      "so does something they just clicked")
+    compare(Api.jobCooldownMs(crawl, 1000, 20000, 0), 19000, "the crawl waits")
+    compare(Api.jobCooldownMs(poll, 1000, 20000, 0), 19000,
+      "so does polling, which nobody is waiting on")
+
+    compare(Api.jobCooldownMs(opened, 1000, 20000, 6000), 5000,
+      "their own refusal does hold them back")
+    compare(Api.jobCooldownMs(null, 1000, 20000, 6000), 0)
+  }
+
   // A refusal often comes from the shared budget rather than from us, and it
   // can last twenty seconds. Waiting all of that out leaves an opened page
   // blank, so a page someone is watching pauses briefly and then tries.

@@ -96,6 +96,12 @@ Changes below start from the fork point. For the history of the original plugin,
   the playlist picker leaving the keyboard nowhere when it closed.
 - A normalisation setting sent without its pregain is refused rather than
   quietly dropped.
+- A page took twenty seconds to open while the library was still loading. A
+  refusal used to pause *every* request, so the library crawl being told to
+  wait also froze the page you had just clicked. The pause is now kept apart:
+  background work waits it out, and only your own request being refused holds
+  your page back. Measured against a live cooldown, an opened page went out
+  with no queue wait at all where polling still sat at 14-18 seconds.
 - The working rules moved from root `AGENTS.md` and `CLAUDE.md` into
   `docs/DEVELOPMENT.md`, and the two agent-instruction files are no longer
   committed. The plugin installs into `~/.config/omarchy/plugins/`, where a

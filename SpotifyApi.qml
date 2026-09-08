@@ -33,6 +33,9 @@ Item {
   // only the slow ones.
   property int slowRequestMs: 0
   property double rateLimitedUntil: 0
+  // Set only when a request someone is waiting on is refused. Background
+  // refusals must not hold an opened page back.
+  property double interactiveLimitedUntil: 0
   // When the current pause began, so an opened page only waits a moment of it.
   property double rateLimitedSince: 0
   property bool cooldownProbeUsed: false
@@ -177,11 +180,14 @@ Item {
         && backgroundInFlight < Api.backgroundInFlightLimit(limit)
       var taken = Api.dequeueApiJob(requestQueue, allowBackground)
       var job = taken.job
-      // While Spotify is refusing, only what the person is watching goes out.
-      if (job && cooldown > 0
+      // The pause that applies to this job, which for a page someone opened is
+      // only ever its own refusals.
+      var jobCooldown = Api.jobCooldownMs(job, now(), rateLimitedUntil,
+        interactiveLimitedUntil)
+      if (job && jobCooldown > 0
           && !Api.jobMayRunDuringCooldown(job, cooldownProbeUsed)) job = null
       if (job) {
-        var wait = Api.foregroundCooldownMs(now(), rateLimitedUntil,
+        var wait = Api.foregroundCooldownMs(now(), interactiveLimitedUntil,
           rateLimitedSince, Api.API_FOREGROUND_COOLDOWN_CAP_MS)
         if (wait > 0) {
           rateLimitTimer.interval = Math.max(50, wait)
@@ -190,8 +196,9 @@ Item {
         }
       }
       if (!job) {
-        if (cooldown > 0) {
-          rateLimitTimer.interval = Math.max(50, cooldown)
+        if (jobCooldown > 0 || cooldown > 0) {
+          rateLimitTimer.interval = Math.max(50,
+            jobCooldown > 0 ? jobCooldown : cooldown)
           rateLimitTimer.restart()
         } else if (backgroundDelay > 0 && requestQueue.length > 0) {
           // Background work waiting only on its spacing gets woken up again.
@@ -200,7 +207,7 @@ Item {
         }
         break
       }
-      if (cooldown > 0) cooldownProbeUsed = true
+      if (jobCooldown > 0) cooldownProbeUsed = true
       requestQueue = taken.queue
       job.handle.slotOpen = true
       job.startedAt = now()
@@ -261,6 +268,10 @@ Item {
             cooldownProbeUsed = false
             rateLimitedUntil = Api.nextRateLimitedUntil(now(),
               Api.responseRetryAfter(xhr), rateLimitedUntil, job.rateLimitRetries)
+            if (Api.apiJobPriority(job) >= 1)
+              interactiveLimitedUntil = Api.nextRateLimitedUntil(now(),
+                Api.responseRetryAfter(xhr), interactiveLimitedUntil,
+                job.rateLimitRetries)
             console.warn("Spotify API rate limited on "
               + String(job.method || "GET") + " " + Api.redact(String(job.path || ""))
               + "; pausing every request for "

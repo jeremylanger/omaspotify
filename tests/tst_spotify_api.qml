@@ -178,6 +178,42 @@ TestCase {
     verify(api.rateLimitedUntil > clock)
   }
 
+  // The library crawl being refused used to pause every request, so opening a
+  // page while it ran cost the whole twenty-second cooldown.
+  function test_backgroundRefusalDoesNotStallAnOpenedPage() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.request("GET", "/me/albums", null, null, function() {},
+      { priority: "background", retryRateLimit: false })
+    complete(requests[0], 429)
+    verify(api.rateLimitedUntil > clock, "background work is told to wait")
+    compare(api.interactiveLimitedUntil, 0, "the person was not refused")
+
+    var opened = 0
+    api.request("GET", "/playlists/discover-weekly", null, null,
+      function() { opened++ }, { priority: "interactive" })
+    compare(requests.length, 2, "the opened page goes out straight away")
+    complete(requests[1], 200)
+    compare(opened, 1)
+  }
+
+  // Their own request being refused still holds them back.
+  function test_ownRefusalStillPausesTheOpenedPage() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.request("GET", "/playlists/one", null, null, function() {},
+      { priority: "interactive", retryRateLimit: false })
+    complete(requests[0], 429)
+    verify(api.interactiveLimitedUntil > clock)
+
+    api.request("GET", "/playlists/two", null, null, function() {},
+      { priority: "interactive" })
+    compare(requests.length, 1, "the next page waits its turn")
+    clock = api.interactiveLimitedUntil
+    api.pumpRequests()
+    compare(requests.length, 2)
+  }
+
   function test_default429StillRetriesAfterCooldown() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)

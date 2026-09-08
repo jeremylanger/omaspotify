@@ -373,6 +373,18 @@ function apiCooldownMs(now, until) {
 // Whatever the person is watching pauses this much and then tries anyway.
 var API_FOREGROUND_COOLDOWN_CAP_MS = 1500
 
+// Which pause applies to a job. A refusal is nearly always the shared budget
+// running dry on background work, and freezing the page someone just opened
+// because the library crawl was told to wait is the whole of why a page took
+// twenty seconds. Their own request being refused is the only thing that
+// holds them back.
+function jobCooldownMs(job, nowMs, backgroundUntil, interactiveUntil) {
+  if (!job) return 0
+  return apiJobPriority(job) >= 1
+    ? apiCooldownMs(nowMs, interactiveUntil)
+    : apiCooldownMs(nowMs, backgroundUntil)
+}
+
 // One early try per refusal, in case it has slack in it. Only for a page
 // someone is watching, only once however many are waiting, and never again for
 // a request that has already been refused itself.
