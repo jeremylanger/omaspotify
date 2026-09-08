@@ -5,8 +5,9 @@
 > Full Spotify player for Omarchy: local playback engine, library, playlists, search — not just an MPRIS popup.
 
 Local clone: `~/jeremy/omaspotify` (origin = our fork, upstream = stappmus, kept for cherry-picks)
-Project config: `CLAUDE.md` is the source of truth; `AGENTS.md` is a one-line pointer to it.
-(It cannot be a symlink — `omarchy plugin validate` rejects any symlink inside a plugin folder.)
+Working rules: `docs/DEVELOPMENT.md`. They used to live in root `CLAUDE.md` and
+`AGENTS.md`; those are no longer committed, because the installed plugin directory is a
+place a coding agent can wander into and read a root instruction file as trusted input.
 
 ---
 
@@ -135,7 +136,7 @@ Changed from the original plan, for two reasons:
    large share of those live in `spotifyd` files we are about to delete. Renaming things
    into the bin is wasted work.
 2. **Decomposition before the UI overhaul.** Phase F is where we live inside `Panel.qml`
-   and `Service.qml`. Splitting them first makes that work faster and — per `CLAUDE.md`'s
+   and `Service.qml`. Splitting them first makes that work faster and — per the
    red/green TDD rule — actually testable. Splitting after means doing the UI work twice.
 
 **A → B → C → D → then E and F interleave → G whenever.**
@@ -146,7 +147,8 @@ Changed from the original plan, for two reasons:
 
 Zero behavior change. Establishes a clean base and a green baseline.
 
-- [ ] Commit `CLAUDE.md`, `AGENTS.md`, `PLAN.md` (all currently untracked)
+- [x] Commit the working rules and `PLAN.md`. The rules ended up in
+      `docs/DEVELOPMENT.md` rather than root agent-instruction files
 - [x] Delete `ArtistSearchSection.qml` — dead, superseded by the inline
       `artistSearchMediaRow` component in `Panel.qml`
 - [x] Delete `patches/` — nothing reads it; both patches are already in the pinned rev
@@ -471,8 +473,8 @@ is 20 files.
 
 ## Appendix: the librespot dependency
 
-We depend on one person's fork of librespot for two patches. Per `CLAUDE.md` — *all code is
-a liability, lean towards having someone else maintain that liability* — the goal is to get
+We depend on one person's fork of librespot for two patches. Per the working rules — *all
+code is a liability, lean towards having someone else maintain that liability* — the goal is to get
 back onto stock librespot. Options:
 
 - **Hold the pin (recommended for now).** Both patches are genuinely wanted: the fade fixes
