@@ -99,4 +99,5 @@ Changes below start from the fork point. For the history of the original plugin,
 - Every screenshot in the README is retaken on the current design, and there
   are three more of them: Your listening, Now playing, and For you. The
   shortcut-hint recording is now a still of the same thing, which is a tenth
-  of the size.
+  of the size. The lyrics shot is retaken too, with Omasing matched to the
+  song the player is actually on.

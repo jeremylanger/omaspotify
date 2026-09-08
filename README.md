@@ -125,6 +125,8 @@ The essentials are always one click away, without reopening the full app.
 One click sends the current track to Omasing, where the lyrics are fetched and
 lined up with your playback position—ready to auto-scroll as you listen.
 
+![Omasing showing lyrics for Disappear over the OmaSpotify player](docs/screenshots/omasing-lyrics.png)
+
 ## Set it up
 
 In OmaSpotify's Settings, choose whether **Super+Shift+M** launches
