@@ -96,6 +96,11 @@ Changes below start from the fork point. For the history of the original plugin,
   the playlist picker leaving the keyboard nowhere when it closed.
 - A normalisation setting sent without its pregain is refused rather than
   quietly dropped.
+- The backend read requests off its socket without a size limit, so a local
+  client that never sent a newline could make it allocate until it died, and
+  several at once multiplied that. One request is now capped, an oversized one
+  is refused and the connection closed, and the number of connected clients is
+  bounded. Reported by @HANCORE-linux reviewing the marketplace submission.
 - A page took twenty seconds to open while the library was still loading. A
   refusal used to pause *every* request, so the library crawl being told to
   wait also froze the page you had just clicked. The pause is now kept apart:
