@@ -21,8 +21,10 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.jeremylanger.omaspotify"
+  // Third-party public manifests omit __sourceDir in newer Omarchy versions.
   readonly property string pluginDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+    ? String(manifest.__sourceDir)
+    : decodeURIComponent(String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "")).replace(/\/$/, "")
   readonly property string homeDirectory: Quickshell.env("HOME") || ""
   readonly property string stateHome: {
     var explicit = String(Quickshell.env("XDG_STATE_HOME") || "").trim()
