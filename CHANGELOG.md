@@ -96,6 +96,13 @@ Changes below start from the fork point. For the history of the original plugin,
   the playlist picker leaving the keyboard nowhere when it closed.
 - A normalisation setting sent without its pregain is refused rather than
   quietly dropped.
+- The OAuth redirect listener no longer buffers whatever a caller sends. It was
+  `socat` piping raw bytes into a newline parser, so anything local could open
+  the loopback port during sign-in and stream a request line that never ended.
+  It is now a helper that reads into a fixed budget, gives up the moment that is
+  passed, holds a deadline over the whole wait, answers and drops anything that
+  is not the redirect, and hands back exactly one line. `socat` is no longer a
+  dependency. Reported by @HANCORE-linux reviewing the marketplace submission.
 - The backend read requests off its socket without a size limit, so a local
   client that never sent a newline could make it allocate until it died, and
   several at once multiplied that. One request is now capped, an oversized one

@@ -42,7 +42,7 @@ while (( $# > 0 )); do
   esac
 done
 
-for command_name in secret-tool openssl socat xdg-open systemctl awk cmp install python3 avahi-browse sha256sum; do
+for command_name in secret-tool openssl xdg-open systemctl awk cmp install python3 avahi-browse sha256sum; do
   command -v "$command_name" >/dev/null 2>&1 || {
     echo "setup.sh: required Omarchy base command is missing: $command_name" >&2
     exit 1

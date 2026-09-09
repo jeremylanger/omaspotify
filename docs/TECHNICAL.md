@@ -78,7 +78,7 @@ diagnosable at all. See `docs/LIBRARY-DATA.md` for the measurements.
 - Omarchy 4 with the Quickshell shell enabled
 - Spotify Premium
 - the exact-commit attested plugin backend, or a local source build
-- Omarchy base tools: `secret-tool`, `openssl`, `socat`, `xdg-open`, `wl-copy`,
+- Omarchy base tools: `secret-tool`, `openssl`, `xdg-open`, `wl-copy`,
   `avahi-browse`, `systemctl`, and Python 3
 
 The verified-release fast path also uses `curl` and GitHub CLI when available;

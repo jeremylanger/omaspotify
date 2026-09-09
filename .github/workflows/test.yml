@@ -63,6 +63,9 @@ jobs:
       - name: Check the panel and page boundary
         run: PYTHONDONTWRITEBYTECODE=1 python3 tests/test_page_interface.py
 
+      - name: Check the OAuth callback listener bounds
+        run: PYTHONDONTWRITEBYTECODE=1 python3 tests/test_oauth_callback.py
+
       - name: Run script tests
         run: ./tests/test-scripts.sh
 

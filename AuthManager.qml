@@ -228,10 +228,14 @@ Item {
     pkceVerifier = result.verifier
     pkceChallenge = result.challenge
     oauthState = result.state
+    // socat handed us every byte it read, so anything local could stream a
+    // request line that never ended and we buffered all of it. The helper
+    // reads into a fixed budget and gives up the moment it is passed.
     callbackListener.command = [
-      "socat", "-T", "180",
-      "TCP4-LISTEN:" + OAuth.normalizedPort(oauthPort) + ",bind=127.0.0.1,reuseaddr",
-      "STDIO"
+      pluginDir + "/scripts/oauth-callback.py",
+      "--port", String(OAuth.normalizedPort(oauthPort)),
+      "--path", String(callbackPath),
+      "--timeout", "180"
     ]
     callbackListener.running = true
     authTimeout.restart()
@@ -260,14 +264,14 @@ Item {
     authTimeout.stop()
     var callback = OAuth.parseCallbackRequestLine(line, callbackPath)
     if (!callback.ok || callback.state !== oauthState) {
-      callbackListener.write(OAuth.failureResponse())
+      callbackListener.write(Qt.btoa(OAuth.failureResponse()) + "\n")
       callbackStopTimer.restart()
       failLogin(callback.ok
         ? "Spotify sign-in could not be verified. Please try again"
         : callback.error, true)
       return
     }
-    callbackListener.write(OAuth.successResponse())
+    callbackListener.write(Qt.btoa(OAuth.successResponse()) + "\n")
     callbackStopTimer.restart()
     exchangeAuthorizationCode(callback.code)
   }
@@ -418,5 +422,12 @@ Item {
     id: keyringClear
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
+  }
+
+  // A listener left running holds the port and keeps waiting on loopback.
+  Component.onDestruction: {
+    authTimeout.stop()
+    callbackStopTimer.stop()
+    if (callbackListener.running) callbackListener.running = false
   }
 }
