@@ -1120,25 +1120,30 @@ Item {
       for (var i = 0; i < rows.length; i++)
         if (rows[i] && String(rows[i].id || "") === pluginId) return rows[i]
     }
+    var config = shell && shell.shellConfig ? shell.shellConfig : null
+    var plugins = config && Array.isArray(config.plugins) ? config.plugins : []
+    for (var p = 0; p < plugins.length; p++)
+      if (plugins[p] && String(plugins[p].id || "") === pluginId) return plugins[p]
     return null
   }
 
   function configuredEntry() {
-    // shellConfig is first-party only. Third-party plugins get the bar section
-    // of the same config as shell.barConfig, so read whichever the host gave
-    // us before falling back to the standalone plugins list.
+    // Third-party plugins no longer receive the raw shellConfig; the host
+    // exposes only the public bar config via shell.barConfig. Without this,
+    // configuredEntry() always returned null and every bar-widget setting
+    // stayed stuck at its manifest default no matter what the user
+    // configured. Fall back to the old shellConfig path in case a host
+    // restores it, then to the standalone plugins list.
+    var bar = shell && shell.barConfig ? shell.barConfig
+      : (shell && shell.shellConfig && shell.shellConfig.bar
+        ? shell.shellConfig.bar : null)
+    var owned = entryInLayout(bar && bar.layout ? bar.layout : null)
+    if (owned) return owned
     var config = shell && shell.shellConfig ? shell.shellConfig : null
-    if (config) {
-      var owned = entryInLayout(config.bar && config.bar.layout
-        ? config.bar.layout : null)
-      if (owned) return owned
-      var plugins = Array.isArray(config.plugins) ? config.plugins : []
-      for (var p = 0; p < plugins.length; p++)
-        if (plugins[p] && String(plugins[p].id || "") === pluginId) return plugins[p]
-      return null
-    }
-    var barConfig = shell && shell.barConfig ? shell.barConfig : null
-    return entryInLayout(barConfig && barConfig.layout ? barConfig.layout : null)
+    var plugins = config && Array.isArray(config.plugins) ? config.plugins : []
+    for (var p = 0; p < plugins.length; p++)
+      if (plugins[p] && String(plugins[p].id || "") === pluginId) return plugins[p]
+    return null
   }
 
   function syncSettings() {
