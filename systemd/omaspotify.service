@@ -4,6 +4,9 @@ Documentation=https://github.com/jeremylanger/omaspotify
 After=graphical-session.target sound.target
 Wants=sound.target
 
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=simple
 Environment=PULSE_LATENCY_MSEC=30
@@ -11,6 +14,7 @@ Environment=TOKIO_WORKER_THREADS=2
 ExecStart=@BACKEND_BINARY@ --config-path=@CONFIG_FILE@
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=75 77 78
 TimeoutStopSec=5
 UMask=0077
 NoNewPrivileges=true

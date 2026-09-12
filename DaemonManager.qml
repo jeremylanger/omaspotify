@@ -45,6 +45,9 @@ Item {
   property string configurationInput: ""
   property bool authAfterStop: false
   property string lastError: ""
+  property bool terminalFailure: false
+  property bool explicitStart: false
+  property int startupStatusAttempts: 0
 
   signal started()
   signal stopped()
@@ -115,12 +118,14 @@ Item {
 
   function refreshStatus() {
     if (!pluginDir || statusCheck.running) return
-    statusCheck.command = ["/usr/bin/bash",
-      pluginDir + "/scripts/playback-runtime.sh", "status"]
+    statusCheck.command = ["systemctl", "--user", "is-active", unitName]
     statusCheck.running = true
   }
 
-  function start() {
+  function start(explicit) {
+    if (terminalFailure && explicit !== true) return
+    explicitStart = explicit === true
+    if (explicitStart) terminalFailure = false
     if (busy || serviceActive) return
     if (!binaryAvailable) {
       lastError = "Playback support is not installed yet"
@@ -139,6 +144,8 @@ Item {
 
   function startCommandNow() {
     startAfterConfiguration = false
+    startCommand.command = ["/usr/bin/bash", pluginDir + "/scripts/playback-runtime.sh",
+      explicitStart ? "start-explicit" : "start"]
     startCommand.running = true
   }
 
@@ -324,11 +331,45 @@ Item {
     }
   }
 
+  Timer {
+    id: startupStatusTimer
+    interval: 1000
+    repeat: true
+    onTriggered: {
+      root.refreshStatus()
+      if (root.mprisPresent || root.terminalFailure || ++root.startupStatusAttempts >= 10) stop()
+    }
+  }
+
   Process {
     id: statusCheck
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
-    onExited: function(exitCode) { root.serviceActive = exitCode === 0 }
+    onExited: function(exitCode) {
+      root.serviceActive = exitCode === 0
+      if (!root.serviceActive && !failureCheck.running) {
+        failureCheck.command = ["/usr/bin/bash", root.pluginDir + "/scripts/playback-runtime.sh", "failure"]
+        failureCheck.running = true
+      }
+    }
+  }
+
+  Process {
+    id: failureCheck
+    stdout: StdioCollector { id: failureOutput; waitForEnd: true }
+    onExited: {
+      var code = String(failureOutput.text || "").trim()
+      var messages = {
+        invalid_configuration: "Playback configuration is invalid. Review Settings, then start this computer again.",
+        missing_credentials: "Authorize playback on this computer in Settings.",
+        reconnect_exhausted: "Playback lost its connection repeatedly. Check the network, then start this computer again.",
+        restart_limit: "Playback stopped after repeated failures. Check your network, Premium account and playback authorization, then start this computer again."
+      }
+      if (messages[code]) {
+        root.terminalFailure = true
+        root.lastError = messages[code]
+      }
+    }
   }
 
   Process {
@@ -348,6 +389,8 @@ Item {
       root.busy = false
       if (exitCode === 0) {
         root.serviceActive = true
+        root.startupStatusAttempts = 0
+        startupStatusTimer.restart()
         root.started()
       } else {
         root.lastError = "Could not start playback on this computer"

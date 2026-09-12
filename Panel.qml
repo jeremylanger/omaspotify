@@ -20,6 +20,16 @@ Item {
   property string currentTab: "home"
   property bool openedForLogin: false
 
+  property double searchClock: Date.now()
+  readonly property int searchCooldownSeconds: service
+    ? Math.max(0, Math.ceil((service.searchCooldownUntil - searchClock) / 1000)) : 0
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.opened && root.showingUniversalSearch && root.service
+      && (root.service.searchLoading || root.searchCooldownSeconds > 0)
+    onTriggered: root.searchClock = Date.now()
+  }
   property string searchText: ""
   property string searchType: "track"
   property string libraryType: "tracks"
@@ -45,12 +55,17 @@ Item {
   property var restoredPlaylist: null
   property int restoredPlaylistItemCount: 0
   property int restoredDetailItemCount: 0
+  readonly property bool artworkVisible: !service || service.artworkEnabled
 
+  property string draftClientId: ""
   property string draftDeviceName: "OmaSpotify"
   property string draftIdleMinutes: "15"
   property bool draftShowMiniPlayer: true
+  property bool draftShowArtwork: true
+  property bool draftShowVinylRecord: false
   property string draftShortcutPlayer: "Omarchy Music app"
   property bool draftShortcutHints: true
+  property bool draftShowLyrics: true
   property bool shortcutModeLatched: false
   property int heldModifierFlags: 0
   property bool panelCursorActive: false
@@ -62,6 +77,7 @@ Item {
   property bool draftShowArtist: false
   property bool draftShowPausedTrack: true
   property bool draftScrollBarText: false
+  property bool draftFixedBarWidth: false
   property real draftScrollSpeed: 1
   // 0 means no cap — the slot grows with the track text.
   property real draftMaxBarTextWidth: 240
@@ -89,7 +105,10 @@ Item {
   readonly property color background: Color.background
   readonly property color accent: Color.accent
   readonly property color muted: Color.muted
-  readonly property color popupBackground: Color.popups.background
+  // In-panel popups have no blur behind them, so a translucent theme popup
+  // colour is floored to stay readable over the list beneath.
+  readonly property color popupBackground: Api.opaqueSurface(
+    Color.popups.background, 0.96)
   readonly property var popupBorderSpec: Border.flat(Color.popups.border,
     Math.max(1, Style.normalBorderWidth))
   readonly property int popupScrollbarGutter: Style.space(14)
@@ -99,6 +118,7 @@ Item {
   readonly property bool sessionPending: service && service.sessionPending
   readonly property bool compactHeight: window.height < Style.space(620)
   readonly property bool compactWidth: window.width < Style.space(760)
+  readonly property bool extraNarrowWidth: window.width < Style.space(440)
   readonly property var activeSearchScope: Api.searchScope(currentTab,
     service ? service.detailItem : null,
     service ? service.selectedPlaylist : null, homeType, libraryType)
@@ -151,17 +171,22 @@ Item {
 
   function syncDraftSettings() {
     if (!service) return
+    draftClientId = String(service.settings.clientId || "")
     draftDeviceName = service.deviceName
     draftIdleMinutes = String(service.idleShutdownMinutes)
     draftShowMiniPlayer = service.showMiniPlayer
+    draftShowArtwork = service.artworkEnabled
+    draftShowVinylRecord = service.showVinylRecord
     draftShortcutPlayer = service.shortcutPlayer
     draftShortcutHints = service.shortcutHintsEnabled
+    draftShowLyrics = service.showLyrics
     draftShowTitle = service.showTrackTitle
     draftShowArtist = service.showArtistName
     draftShowPausedTrack = service.showPausedTrack
     draftScrollBarText = service.scrollBarText
     draftScrollSpeed = service.scrollSpeed
     draftMaxBarTextWidth = service.maxBarTextWidth
+    draftFixedBarWidth = service.fixedBarWidth
     draftAudioQuality = service.audioQuality
     draftNormalizeVolume = service.normalizeVolume
     draftVolumeLevel = service.volumeLevel
@@ -174,14 +199,18 @@ Item {
       idleShutdownMinutes: Math.max(0, Math.min(1440,
         Math.floor(Number(draftIdleMinutes) || 0))),
       showMiniPlayer: draftShowMiniPlayer ? "On" : "Off",
+      showArtwork: draftShowArtwork ? "On" : "Off",
+      showVinylRecord: draftShowVinylRecord ? "On" : "Off",
       shortcutPlayer: draftShortcutPlayer,
       shortcutHints: draftShortcutHints ? "On" : "Off",
+      showLyrics: draftShowLyrics ? "On" : "Off",
       showTrackTitle: draftShowTitle ? "On" : "Off",
       showArtistName: draftShowArtist ? "On" : "Off",
       showPausedTrack: draftShowPausedTrack ? "On" : "Off",
       scrollBarText: draftScrollBarText ? "On" : "Off",
       scrollSpeed: Api.normalizedScrollSpeed(draftScrollSpeed),
       maxBarTextWidth: Api.normalizedMaxBarTextWidth(draftMaxBarTextWidth),
+      fixedBarWidth: draftFixedBarWidth ? "On" : "Off",
       audioQuality: draftAudioQuality,
       normalizeVolume: draftNormalizeVolume ? "On" : "Off",
       volumeLevel: draftVolumeLevel
@@ -254,7 +283,10 @@ Item {
   }
 
   function enforceScrollAvailability() {
-    if (barTextWidthUnlimited) draftScrollBarText = false
+    if (barTextWidthUnlimited) {
+      draftScrollBarText = false
+      draftFixedBarWidth = false
+    }
     if (!Api.canScrollBarText(draftShowTitle, draftShowArtist))
       draftScrollBarText = false
   }
@@ -586,7 +618,7 @@ Item {
     }
     if (service && (currentTab === "search" || universalSearchActive)) {
       if (searchText.trim() === "") service.clearSearch()
-      else service.search(searchText)
+      else service.search(searchText, searchType)
     }
     else if (service && currentTab !== "detail") service.openView(currentTab, false)
     syncUnifiedSearchField()
@@ -950,6 +982,7 @@ Item {
     if (service && service.playbackControllable)
       actions.push("shuffle", spokenWordPlaying ? "back15" : "previous", "play",
         spokenWordPlaying ? "forward30" : "next", "repeat")
+    else if (service && service.playbackStartable) actions.push("play")
     if (service && service.lyricsAvailable) actions.push("lyrics")
     if (service && service.lengthSeconds > 0 && service.playbackControllable)
       actions.push("seek")
@@ -968,6 +1001,7 @@ Item {
     if (currentTab === "playlists" && service && service.selectedPlaylist)
       actions.push("playlist-play", "playlist-more")
     if (showingUniversalSearch) {
+      if (service && service.searchError) actions.push("retry-search")
       for (var s = 0; s < Api.SEARCH_TYPES.length; s++)
         actions.push("search-" + Api.SEARCH_TYPES[s])
     }
@@ -990,6 +1024,7 @@ Item {
       if (collection && collection.showSort) actions.push("sort")
       if (collection || pageListView()) actions.push("list")
       if (collection && collection.hasMore) actions.push("more")
+      if (collection && collection.filterScanAvailable) actions.push("filter-scan")
     }
     return actions
   }
@@ -1148,6 +1183,8 @@ Item {
       collection.keyboardHintsActive = hintsOn
       collection.keyboardSortSelected = cursorOn("page", "sort")
       collection.keyboardMoreSelected = cursorOn("page", "more")
+      collection.keyboardFilterScanSelected = cursorOn("page", "filter-scan")
+      collection.keyboardFilterScanHint = hintsOn ? navHintFor("page", "filter-scan") : ""
       collection.keyboardSortHint = hintsOn ? navHintFor("page", "sort") : ""
       collection.keyboardMoreHint = hintsOn ? navHintFor("page", "more") : ""
       collection.keyboardListHint = ""
@@ -1174,6 +1211,7 @@ Item {
     ensurePanelCursor()
     var action = panelCursorAction
     if (action === "nav-home") chooseTab("home")
+    else if (action === "nav-search") { chooseTab("search"); focusSearch() }
     else if (action === "nav-discover") chooseTab("discover")
     else if (action === "nav-radio") openLastRadio()
     else if (action === "nav-queue") chooseTab("queue")
@@ -1190,6 +1228,14 @@ Item {
     else if (action === "search") focusSearch()
     else if (action === "scope") toggleSearchScope()
     else if (action === "help") toggleShortcutHelp()
+    else if (action === "filter-scan") {
+      var scanning = pageCollection()
+      if (scanning) {
+        if (scanning.filterScanPaused) scanning.continueFilterScan()
+        else scanning.cancelFilterScan()
+      }
+    }
+    else if (action === "retry-search" && service) service.retrySearch(searchType)
     else if (action === "refresh") refreshButton.clicked()
     else if (action === "close") requestClose()
     else if (action === "like" && service) service.toggleCurrentTrackSaved()
@@ -1213,7 +1259,7 @@ Item {
       libraryType = action.substring(8)
       if (service) service.loadLibrary(libraryType, false)
     } else if (action.indexOf("search-") === 0) {
-      searchType = action.substring(7)
+      selectSearchType(action.substring(7))
     } else if (action === "playlist-play" && service && service.selectedPlaylist)
       playSelectedPlaylist()
     else if (action === "playlist-more" && service && service.selectedPlaylist)
@@ -1565,7 +1611,7 @@ Item {
   }
 
   function shortcutRows() {
-    return [
+    var rows = [
       { section: "SEARCH", action: "Focus search", keys: "Ctrl+F or /" },
       { action: "Toggle this area / all of Spotify", keys: "Ctrl+F or /" },
       { action: "Leave search", keys: "Esc" },
@@ -1601,6 +1647,9 @@ Item {
       { action: "Hide visible shortcut hints", keys: "Ctrl+H" },
       { action: "Show this reference", keys: "Ctrl+/" }
     ]
+    if (!service || !service.showLyrics)
+      rows = rows.filter(function(row) { return row.keys !== "Ctrl+Shift+L" })
+    return rows
   }
 
   function scopedSearchText() {
@@ -1646,7 +1695,7 @@ Item {
       unifiedSearchField.text = next
   }
 
-  function runUnifiedSearch() {
+  function runUnifiedSearch(force) {
     unifiedSearchDelay.stop()
     if (!service) return
     if (activeSearchScope.available && searchInContext) {
@@ -1657,7 +1706,7 @@ Item {
     if (currentTab !== "search" && searchText.trim() !== "")
       universalSearchActive = true
     if (searchText.trim() === "") service.clearSearch()
-    else service.search(searchText)
+    else service.search(searchText, searchType, force === true)
   }
 
   function editUnifiedSearch(value) {
@@ -1718,7 +1767,7 @@ Item {
       universalSearchActive = true
       if (service) {
         if (searchText.trim() === "") service.clearSearch()
-        else service.search(searchText)
+        else service.search(searchText, searchType)
       }
     } else {
       searchInContext = true
@@ -1762,6 +1811,13 @@ Item {
     else focusSearch()
   }
 
+  function selectSearchType(type) {
+    var value = Api.normalizedSearchType(type)
+    if (searchType !== value) searchType = value
+    if (service && showingUniversalSearch && searchText.trim() !== "")
+      service.search(searchText, value)
+  }
+
   function seekBy(seconds) {
     if (!service || !service.playbackControllable) return
     service.seekSeconds(Api.seekPosition(service.positionSeconds, seconds,
@@ -1799,12 +1855,13 @@ Item {
   }
 
   function openLyrics() {
-    if (!service || !service.currentLyricsSong) return
+    if (!service || !service.lyricsAvailable) return
     var result = service.requestLyrics(lyricsRequestKey)
     if (result !== "opening") lyricsInstallPopup.open()
   }
 
   function open(payloadJson) {
+    searchClock = Date.now()
     var payload = ({})
     try { payload = JSON.parse(String(payloadJson || "{}")) || ({}) } catch (e) {}
     if (shell && shell.bar
@@ -1846,8 +1903,9 @@ Item {
       restorePlaylistSelection()
       if (currentTab === "detail" && requestedDetail)
         service.openDetail(requestedDetail)
-      if (currentTab === "search" && searchText && service.searchQuery !== searchText)
-        service.search(searchText)
+      if (currentTab === "search" && Api.searchNeedsLoad(searchText,
+          service.searchResultQuery, service.searchLoadedTypes[searchType]))
+        service.search(searchText, searchType)
     }
     Qt.callLater(function() {
       focusScope.forceActiveFocus()
@@ -1891,6 +1949,7 @@ Item {
       openedForLogin = true
       return
     }
+    var enteringSearch = currentTab !== "search" && tab === "search"
     disarmEscapeClose()
     unifiedSearchDelay.stop()
     if (showingUniversalSearch && tab !== "search" && service) service.cancelSearch(false)
@@ -1903,6 +1962,9 @@ Item {
     if (service) {
       service.openView(tab, false)
       if (tab === "playlists") restorePlaylistSelection()
+      if (enteringSearch && Api.searchNeedsLoad(searchText,
+          service.searchResultQuery, service.searchLoadedTypes[searchType]))
+        service.search(searchText, searchType)
     }
     syncUnifiedSearchField()
   }
@@ -1916,6 +1978,7 @@ Item {
   function primaryNavigationItems() {
     var items = [
       { id: "home", label: "For you", icon: "󰎆" },
+      { id: "search", label: "Search", icon: "󰍉" },
       { id: "discover", label: "Discover", icon: "󰲸" }
     ]
     if (service && service.lastRadioPlaylist) items.push({
@@ -1927,6 +1990,19 @@ Item {
     items.push({ id: "queue", label: "Queue", icon: "󰐕" })
     items.push({ id: "stats", label: "Listening", icon: "󰄨" })
     return items
+  }
+
+  function extraNarrowNavigationItems() {
+    return [
+      { id: "home", label: "For you", icon: "󰎆" },
+      { id: "search", label: "Search", icon: "󰍉" },
+      { id: "discover", label: "Discover", icon: "󰲸" },
+      { id: "queue", label: "Queue", icon: "󰐕" },
+      { id: "library", label: "Your Library", icon: "󰋑" },
+      { id: "playlists", label: "Playlists", icon: "󱁐" },
+      { id: "devices", label: "Devices", icon: "󰋋" },
+      { id: "setup", label: "Settings", icon: "󰒓" }
+    ]
   }
 
   function radioNavigationSelected() {
@@ -2484,7 +2560,7 @@ Item {
       Shortcut {
         sequence: "Space"
         enabled: !root.shortcutsBlocked && !root.textInputFocused()
-          && root.service && root.service.playbackControllable
+          && root.service && root.service.playbackStartable
         onActivated: {
           root.latchShortcutMode(sequence)
           if (root.service) root.service.togglePlayback()
@@ -2603,7 +2679,7 @@ Item {
 
           BorderSurface {
             id: sidebar
-            visible: root.currentTab !== "login"
+            visible: root.currentTab !== "login" && !root.extraNarrowWidth
             width: visible
               ? (root.compactWidth ? Style.space(54)
                 : Math.min(Style.space(214), Math.max(Style.space(176), workspace.width * 0.225)))
@@ -2622,12 +2698,13 @@ Item {
               height: visible ? Style.space(24) : 0
               spacing: Style.space(9)
 
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
+              OpticalGlyph {
+                width: root.compactWidth ? parent.width : Style.space(18)
+                height: parent.height
                 text: ""
                 color: root.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.iconLarge
+                fontFamily: root.fontFamily
+                fontSize: Style.font.iconLarge
               }
 
               Column {
@@ -2670,11 +2747,13 @@ Item {
                   readonly property bool radioEntry: modelData.id === "radio"
                   width: primaryNavigation.width
                   text: root.compactWidth ? "" : modelData.label
-                  iconText: modelData.icon
+                  iconText: root.compactWidth ? "" : modelData.icon
                   foreground: root.foreground
                   selected: radioEntry ? root.radioNavigationSelected()
                     : root.currentTab === modelData.id
                   leftAlign: !root.compactWidth
+                  horizontalPadding: root.compactWidth
+                    ? 0 : Style.spacing.controlPaddingX
                   focusable: false
                   hasCursor: root.cursorOn("sidebar", "nav-" + modelData.id)
                   tooltipText: radioEntry && root.service && root.service.lastRadioPlaylist
@@ -2692,6 +2771,16 @@ Item {
                     region: "sidebar"
                     action: "nav-" + modelData.id
                     sequences: root.primaryNavigationShortcut(modelData.id)
+                  }
+                  OpticalGlyph {
+                    anchors.fill: parent
+                    visible: root.compactWidth
+                    text: modelData.icon
+                    color: parent.selected
+                      ? Style.selectedStateColor(root.foreground, root.accent)
+                      : root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: Style.font.icon
                   }
                 }
               }
@@ -2729,10 +2818,12 @@ Item {
               Button {
                 width: parent.width
                 text: root.compactWidth ? "" : "Liked Songs"
-                iconText: "󰋑"
+                iconText: root.compactWidth ? "" : "󰋑"
                 foreground: root.foreground
                 selected: root.currentTab === "library"
                 leftAlign: !root.compactWidth
+                horizontalPadding: root.compactWidth
+                  ? 0 : Style.spacing.controlPaddingX
                 focusable: false
                 hasCursor: root.cursorOn("sidebar", "nav-library")
                 tooltipText: "Liked Songs"
@@ -2741,20 +2832,34 @@ Item {
                   if (on) root.setPanelCursor("sidebar", "nav-library")
                 }
                 KeyHint { region: "sidebar"; action: "nav-library" }
+                OpticalGlyph {
+                  anchors.fill: parent
+                  visible: root.compactWidth
+                  text: "󰋑"
+                  color: parent.selected
+                    ? Style.selectedStateColor(root.foreground, root.accent)
+                    : root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.icon
+                }
               }
 
-              Row {
+              Grid {
                 width: parent.width
+                columns: root.compactWidth ? 1 : 2
                 spacing: Style.space(2)
 
                 Button {
-                  width: Math.max(20, parent.width - createPlaylistShortcut.width
-                    - parent.spacing)
+                  width: root.compactWidth ? parent.width
+                    : Math.max(20, parent.width - createPlaylistShortcut.width
+                      - parent.spacing)
                   text: root.compactWidth ? "" : "Playlists"
-                  iconText: "󱁐"
+                  iconText: root.compactWidth ? "" : "󱁐"
                   foreground: root.foreground
                   selected: root.currentTab === "playlists"
                   leftAlign: !root.compactWidth
+                  horizontalPadding: root.compactWidth
+                    ? 0 : Style.spacing.controlPaddingX
                   focusable: false
                   hasCursor: root.cursorOn("sidebar", "nav-playlists")
                   tooltipText: "Playlists"
@@ -2763,12 +2868,22 @@ Item {
                     if (on) root.setPanelCursor("sidebar", "nav-playlists")
                   }
                   KeyHint { region: "sidebar"; action: "nav-playlists" }
+                  OpticalGlyph {
+                    anchors.fill: parent
+                    visible: root.compactWidth
+                    text: "󱁐"
+                    color: parent.selected
+                      ? Style.selectedStateColor(root.foreground, root.accent)
+                      : root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: Style.font.icon
+                  }
                 }
 
                 Button {
                   id: createPlaylistShortcut
                   width: root.compactWidth
-                    ? Math.max(20, (parent.width - parent.spacing) / 2) : implicitWidth
+                    ? parent.width : implicitWidth
                   text: "+"
                   foreground: root.foreground
                   fontSize: Style.font.subtitle
@@ -2968,7 +3083,8 @@ Item {
               anchors.bottom: parent.bottom
               anchors.margins: Style.space(2)
               text: root.compactWidth ? "" : "Settings"
-              iconText: root.service && root.service.auth.loggedIn ? "󰀄" : "󰒓"
+              iconText: root.compactWidth ? ""
+                : (root.service && root.service.auth.loggedIn ? "󰀄" : "󰒓")
               foreground: root.foreground
               selected: root.currentTab === "setup"
               leftAlign: !root.compactWidth
@@ -2980,19 +3096,70 @@ Item {
               onHovered: function(on) {
                 if (on) root.setPanelCursor("sidebar", "nav-settings")
               }
+              OpticalGlyph {
+                anchors.fill: parent
+                visible: root.compactWidth
+                text: root.service && root.service.auth.loggedIn ? "󰀄" : "󰒓"
+                color: parent.selected
+                  ? Style.selectedStateColor(root.foreground, root.accent)
+                  : root.foreground
+                fontFamily: root.fontFamily
+                fontSize: Style.font.icon
+              }
             }
           }
 
           Item {
             id: contentPane
-            width: Math.max(220, parent.width - sidebar.width - workspace.spacing)
+            width: Math.max(1, parent.width - sidebar.width - workspace.spacing)
             height: parent.height
+
+            Row {
+              id: extraNarrowNavigation
+              visible: root.extraNarrowWidth && root.currentTab !== "login"
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              height: visible ? Style.space(32) : 0
+              spacing: Style.space(3)
+
+              Repeater {
+                model: root.extraNarrowNavigationItems()
+
+                Button {
+                  required property var modelData
+                  width: Math.max(1, (extraNarrowNavigation.width
+                    - extraNarrowNavigation.spacing * 6) / 7)
+                  height: extraNarrowNavigation.height
+                  horizontalPadding: 0
+                  verticalPadding: 0
+                  foreground: root.foreground
+                  selected: root.currentTab === modelData.id
+                  tooltipText: modelData.label
+                  focusable: false
+                  onClicked: root.chooseTab(modelData.id)
+
+                  OpticalGlyph {
+                    anchors.fill: parent
+                    text: modelData.icon
+                    color: parent.selected
+                      ? Style.selectedStateColor(root.foreground, root.accent)
+                      : root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: Style.font.icon
+                  }
+                }
+              }
+            }
 
             Row {
               id: pageHeader
               anchors.left: parent.left
               anchors.right: parent.right
-              anchors.top: parent.top
+              anchors.top: extraNarrowNavigation.visible
+                ? extraNarrowNavigation.bottom : parent.top
+              anchors.topMargin: extraNarrowNavigation.visible
+                ? Style.space(4) : 0
               height: Math.max(closeButton.implicitHeight, titleColumn.implicitHeight)
               spacing: Style.space(5)
 
@@ -3035,7 +3202,7 @@ Item {
 
               Button {
                 id: shortcutHintsDismissButton
-                visible: root.shortcutHintsActive
+                visible: root.shortcutHintsActive && !root.extraNarrowWidth
                 anchors.verticalCenter: parent.verticalCenter
                 text: "Ctrl+H · Hide hints"
                 foreground: root.foreground
@@ -3047,6 +3214,7 @@ Item {
 
               Button {
                 id: shortcutHelpButton
+                visible: !root.extraNarrowWidth
                 anchors.verticalCenter: parent.verticalCenter
                 text: "?"
                 foreground: root.foreground
@@ -3074,7 +3242,7 @@ Item {
                 KeyHint { region: "header"; action: "refresh" }
                 onClicked: {
                   if (!root.service) return
-                  if (root.showingUniversalSearch) root.runUnifiedSearch()
+                  if (root.showingUniversalSearch) root.runUnifiedSearch(true)
                   else if (root.currentTab === "detail" && root.service.detailItem)
                     root.service.openDetail(root.service.detailItem,
                       root.service.detailItem.type === "artist"
@@ -3277,28 +3445,40 @@ Item {
             anchors.margins: Style.space(2)
             anchors.leftMargin: 0
             anchors.rightMargin: 0
-            spacing: Style.space(12)
+            spacing: Style.space(root.extraNarrowWidth ? 6 : 12)
 
             Item {
               id: nowPlaying
-              width: Math.max(Style.space(170), Math.min(Style.space(240), playerRow.width * 0.29))
+              width: root.extraNarrowWidth
+                ? Math.max(Style.space(80), playerRow.width - transport.width
+                  - playerRow.spacing)
+                : Math.max(Style.space(170), Math.min(Style.space(240),
+                  playerRow.width * 0.29))
               height: parent.height
               readonly property real metadataSpacing: Style.space(9)
+              readonly property bool artworkVisible: !root.service
+                || root.service.artworkEnabled
 
               BorderSurface {
                 id: nowPlayingArtwork
-                width: Math.min(parent.height, Style.space(68))
+                width: nowPlaying.artworkVisible ? Math.min(parent.height,
+                  Style.space(root.extraNarrowWidth ? 52 : 68)) : 0
                 height: width
+                visible: nowPlaying.artworkVisible
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 radius: Style.cornerRadius
                 color: Style.selectedFillFor(root.foreground, root.accent)
                 borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
 
-                Image {
+                RetryImage {
+                  id: playerArtworkImage
                   anchors.fill: parent
                   anchors.margins: Style.space(2)
-                  source: root.service ? root.service.artUrl : ""
+                  requestedSource: root.service && root.service.artworkEnabled
+                    ? Api.idleMediaText(root.service.artUrl,
+                      root.service.lastPlayedItem, "imageUrl", "")
+                    : ""
                   sourceSize.width: 136
                   sourceSize.height: 136
                   fillMode: Image.PreserveAspectFit
@@ -3309,7 +3489,7 @@ Item {
 
                 Text {
                   anchors.centerIn: parent
-                  visible: !root.service || root.service.artUrl === ""
+                  visible: playerArtworkImage.status !== Image.Ready
                   text: "󰎈"
                   color: root.muted
                   font.family: root.fontFamily
@@ -3320,7 +3500,8 @@ Item {
 
               Column {
                 anchors.left: nowPlayingArtwork.right
-                anchors.leftMargin: nowPlaying.metadataSpacing
+                anchors.leftMargin: nowPlayingArtwork.visible
+                  ? nowPlaying.metadataSpacing : 0
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(3)
@@ -3334,9 +3515,12 @@ Item {
                       - (nowPlayingActions.visible
                         ? nowPlayingActions.width + parent.spacing : 0))
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.service && root.service.title
-                      ? root.service.title : "Nothing playing"
-                    color: root.foreground
+                    text: Api.idleMediaText(
+                      root.service ? root.service.title : "",
+                      root.service ? root.service.lastPlayedItem : null, "name",
+                      "Nothing playing")
+                    color: root.service && root.service.title
+                      ? root.foreground : root.muted
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                     font.bold: true
@@ -3345,8 +3529,9 @@ Item {
 
                   Row {
                     id: nowPlayingActions
-                    visible: currentTrackLikeButton.visible
+                    visible: !root.extraNarrowWidth && (currentTrackLikeButton.visible
                       || currentTrackMoreButton.visible
+                    )
                     spacing: Style.space(1)
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -3426,8 +3611,10 @@ Item {
                     anchors.rightMargin: currentArtistHint.reservedRight
                     anchors.verticalCenter: parent.verticalCenter
                     artists: root.service ? root.service.currentArtists : []
-                    fallbackText: root.service && root.service.artist
-                      ? root.service.artist : "Choose something to play"
+                    fallbackText: Api.idleMediaText(
+                      root.service ? root.service.artist : "",
+                      root.service ? root.service.lastPlayedItem : null,
+                      "subtitle", "Choose something to play")
                     fallbackClickable: root.service && root.service.artist !== ""
                       && root.service.currentArtistContextAvailable
                       && artists.length === 0
@@ -3504,7 +3691,11 @@ Item {
 
             Column {
               id: transport
-              width: Math.max(120, parent.width - nowPlaying.width - outputControls.width - parent.spacing * 2)
+              width: root.extraNarrowWidth
+                ? Math.max(Style.space(88), Math.min(Style.space(108),
+                  parent.width * 0.42))
+                : Math.max(120, parent.width - nowPlaying.width
+                  - outputControls.width - parent.spacing * 2)
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(1)
 
@@ -3513,6 +3704,7 @@ Item {
                 spacing: Style.space(3)
 
                 TransportButton {
+                  visible: !root.extraNarrowWidth
                   glyphText: "󰒟"
                   foreground: root.foreground
                   selected: root.service && root.service.shuffle
@@ -3557,8 +3749,10 @@ Item {
                   selected: root.service && root.service.playing
                   hasCursor: root.cursorOn("footer", "play")
                   tooltipText: root.shortcutHint(
-                    root.service && root.service.playing ? "Pause" : "Play", "Space")
-                  enabled: root.service && root.service.playbackControllable
+                    root.service && root.service.playing ? "Pause"
+                      : (root.service && root.service.canResumeLastPlayed
+                        ? "Resume last played" : "Play"), "Space")
+                  enabled: root.service && root.service.playbackStartable
                   onClicked: if (root.service) root.service.togglePlayback()
                   onHovered: function(on) {
                     if (on) root.setPanelCursor("footer", "play")
@@ -3591,6 +3785,7 @@ Item {
                   KeyHint { region: "footer"; action: "next"; sequences: ["Ctrl+Right"] }
                 }
                 TransportButton {
+                  visible: !root.extraNarrowWidth
                   glyphText: root.service && root.service.repeatMode === "track" ? "󰑘" : "󰑖"
                   foreground: root.foreground
                   selected: root.service && root.service.repeatMode !== "off"
@@ -3606,6 +3801,7 @@ Item {
                   KeyHint { region: "footer"; action: "repeat"; sequences: ["Ctrl+R"] }
                 }
                 TransportButton {
+                  visible: !root.extraNarrowWidth
                   glyphText: "󰎈"
                   foreground: root.foreground
                   hasCursor: root.cursorOn("footer", "lyrics")
@@ -3689,7 +3885,10 @@ Item {
 
             Column {
               id: outputControls
-              width: Math.max(Style.space(128), Math.min(Style.space(170), playerRow.width * 0.22))
+              visible: !root.extraNarrowWidth
+              width: visible
+                ? Math.max(Style.space(128), Math.min(Style.space(170),
+                  playerRow.width * 0.22)) : 0
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.space(3)
 

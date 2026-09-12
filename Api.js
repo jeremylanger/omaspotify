@@ -264,8 +264,8 @@ function rateLimitRetryMs(retryAfter, attempt) {
   var retry = Math.max(0, Math.floor(Number(attempt) || 0))
   var backoffMs = 1000 * Math.pow(2, retry)
   // Spotify often 429s again if we retry at exactly Retry-After, especially
-  // when the header is 1 second. Wait a little longer and grow the delay.
-  return Math.min(30000, Math.max(1000, headerMs, backoffMs) + 400)
+  // when the header is 1 second. Cap our backoff, never the server delay.
+  return Math.max(1000, headerMs, Math.min(30000, backoffMs)) + 400
 }
 
 function shouldRetryRateLimit(retriesSoFar) {
@@ -1272,8 +1272,20 @@ function spotifyTypeLabel(type) {
 
 var MUTE_THRESHOLD = 0.001
 var UNMUTE_FLOOR = 0.05
-var SEARCH_DEBOUNCE_MS = 600
+var SEARCH_DEBOUNCE_MS = 300
 var SEARCH_REQUEST_TIMEOUT_MS = 8000
+
+function normalizedSearchType(value) {
+  var type = String(value || "")
+  return SEARCH_TYPES.indexOf(type) >= 0 ? type : "track"
+}
+
+function searchNeedsLoad(query, activeQuery, typeLoaded) {
+  var term = String(query || "").trim()
+  return term !== "" && (String(activeQuery || "").trim() !== term
+    || typeLoaded !== true)
+}
+
 var VOLUME_FLUSH_MS = 80
 var VOLUME_FLUSH_REMOTE_MS = 250
 var VOLUME_FLUSH_SONOS_MS = 120
@@ -1342,6 +1354,69 @@ function backendLoadFields(body) {
   return fields
 }
 
+// Popups drawn inside the panel (shortcut help, menus, pickers) sit over the
+// panel's own content with no compositor blur of their own. Glass themes set
+// the popup colour to a low alpha meant for separate blurred windows, which
+// leaves these unreadable. Keep the hue, floor the alpha.
+function opaqueSurface(color, minimumAlpha) {
+  var floor = Math.max(0, Math.min(1, Number(minimumAlpha) || 0))
+  if (!color || color.a === undefined) return color
+  return color.a >= floor ? color : Qt.rgba(color.r, color.g, color.b, floor)
+}
+
+// Width of the bar slot for a label that measures `fitted` px. A cap trims
+// long titles; a fixed slot also pads short ones so the widget, and everything
+// laid out after it, keeps its place when the song changes.
+function barSlotWidth(fixed, cap, fitted, minimum) {
+  var capped = Number(cap) || 0
+  var natural = Math.max(0, Number(fitted) || 0)
+  var width = capped > 0
+    ? (fixed === true ? capped : Math.min(capped, natural))
+    : natural
+  return Math.max(Number(minimum) || 0, width)
+}
+
+// The desktop app keeps the last play loaded in its footer, so Play always has
+// somewhere to go. Spotify's play endpoint only resumes while the receiver
+// still holds a context, which spotifyd loses once it idles out or restarts.
+// Pick the most recent play, with the playlist or album it came from, so an
+// idle receiver can continue there instead of leaving Play dead.
+function resumeCandidateFromRecentlyPlayed(payload, imageWidth) {
+  var source = payload || {}
+  var values = Array.isArray(source.items) ? source.items : []
+  for (var i = 0; i < values.length; i++) {
+    var entry = values[i]
+    if (!entry || typeof entry !== "object") continue
+    var item = normalizeTrack(entry, imageWidth || 192)
+    if (!item || !item.uri) continue
+    var context = entry.context && typeof entry.context === "object"
+      ? entry.context : null
+    var contextUri = context && context.uri ? String(context.uri) : ""
+    return {
+      item: item,
+      // The play endpoint accepts album and playlist contexts. Artist and
+      // collection contexts fall back to the single track.
+      contextUri: /^spotify:(album|playlist):/.test(contextUri) ? contextUri : "",
+      playedAt: String(entry.played_at || "")
+    }
+  }
+  return null
+}
+
+function resumePlaybackAvailable(hasMedia, candidate) {
+  return hasMedia !== true && !!candidate && !!candidate.item
+    && !!candidate.item.uri
+}
+
+// Footer text while nothing is loaded: the live value, else the matching field
+// of the last played item, else the idle label.
+function idleMediaText(current, item, key, fallback) {
+  var value = String(current || "")
+  if (value) return value
+  if (item && typeof item === "object" && item[key]) return String(item[key])
+  return String(fallback || "")
+}
+
 // Preserve Spotify's current playback target unless the user explicitly chose
 // another device in this app. The local engine player is only the fallback
 // when Spotify has no active device. Keeping a restricted device here avoids
@@ -1381,13 +1456,12 @@ function automaticLocalPlaybackDevice(selectedId, preferredDevice, localDevice) 
       && candidate.restricted !== true ? candidate : null
 }
 
-// Omitting device_id tells Spotify to keep the user's active device. Address a
-// device directly only for an explicit choice or an inactive fallback target.
+// Freeze the chosen receiver for this playback intent. A missing ID remains
+// valid for hardware players exposed only through current playback.
 function playbackTargetDeviceId(device, explicitSelection) {
   var item = device || null
   if (!item) return ""
-  return explicitSelection === true || item.active !== true
-    ? String(item.id || "") : ""
+  return String(item.id || "")
 }
 
 function isLocalPlaybackDevice(device, configuredName, runtimeName, knownId) {

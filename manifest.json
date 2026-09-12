@@ -32,17 +32,22 @@
       "deviceName": "OmaSpotify",
       "idleShutdownMinutes": 15,
       "showMiniPlayer": "On",
+      "showVinylRecord": "Off",
       "shortcutPlayer": "Omarchy Music app",
       "shortcutHints": "On",
+      "showLyrics": "On",
       "showTrackTitle": "On",
       "showArtistName": "Off",
       "showPausedTrack": "On",
       "scrollBarText": "Off",
       "scrollSpeed": "1",
       "maxBarTextWidth": "240",
+      "fixedBarWidth": "Off",
       "audioQuality": "320 kbps",
+      "showArtwork": "On",
       "normalizeVolume": "On",
-      "volumeLevel": "Normal"
+      "volumeLevel": "Normal",
+      "clientId": ""
     },
     "schema": [
       {
@@ -74,6 +79,17 @@
         "description": "When off, clicking the Spotify bar icon opens the full player directly."
       },
       {
+        "key": "showVinylRecord",
+        "type": "enum",
+        "label": "Spinning vinyl artwork",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "Off",
+        "description": "Adds a spinning vinyl record for the mini-player artwork while music is playing."
+      },
+      {
         "key": "shortcutPlayer",
         "type": "enum",
         "label": "Keyboard shortcut opens",
@@ -83,7 +99,7 @@
           "Mini player"
         ],
         "defaultValue": "Omarchy Music app",
-        "description": "Choose whether Super+Shift+M launches Omarchy's Music app, the full player, or the mini-player."
+        "description": "Choose whether Super+Shift+M launches Omarchy's Music app, the full player, or the mini-player. Requires the one-time bindings.lua override from the README; without it Omarchy's stock Music binding stays active."
       },
       {
         "key": "shortcutHints",
@@ -95,6 +111,17 @@
         ],
         "defaultValue": "On",
         "description": "After the first shortcut, matching controls show the next key to press. Shortcuts still work when this is off."
+      },
+      {
+        "key": "showLyrics",
+        "type": "enum",
+        "label": "Lyrics button",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "On",
+        "description": "Show the Omasing lyrics button in the player and mini-player. When off, Ctrl+Shift+L is inactive too."
       },
       {
         "key": "showTrackTitle",
@@ -154,6 +181,17 @@
         "description": "Width from 160 to 560 px. Use 0 for unlimited."
       },
       {
+        "key": "fixedBarWidth",
+        "type": "enum",
+        "label": "Fixed bar width",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "Off",
+        "description": "When on, the bar label always reserves the maximum width while a track is shown, so neighbouring widgets do not shift between songs. Unavailable while the width is unlimited."
+      },
+      {
         "key": "audioQuality",
         "type": "enum",
         "label": "Local playback quality",
@@ -164,6 +202,17 @@
         ],
         "defaultValue": "320 kbps",
         "description": "Takes effect the next time playback starts."
+      },
+      {
+        "key": "showArtwork",
+        "type": "enum",
+        "label": "Show artwork",
+        "options": [
+          "On",
+          "Off"
+        ],
+        "defaultValue": "On",
+        "description": "Download and display cover artwork."
       },
       {
         "key": "normalizeVolume",
@@ -187,6 +236,14 @@
         ],
         "defaultValue": "Normal",
         "description": "How loud normalized playback aims to be. Takes effect the next time playback starts."
+      },
+      {
+        "key": "clientId",
+        "type": "string",
+        "label": "Spotify Developer app client ID",
+        "defaultValue": "",
+        "description": "Optional personal Spotify Developer app client ID, with its own quota. Empty keeps the plugin's client. A valid 32-hex ID is required. Changing it clears the current session and requires authorization for your app."
+
       }
     ]
   }

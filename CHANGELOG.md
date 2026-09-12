@@ -124,3 +124,30 @@ Changes below start from the fork point. For the history of the original plugin,
   shortcut-hint recording is now a still of the same thing, which is a tenth
   of the size. The lyrics shot is retaken too, with Omasing matched to the
   song the player is actually on.
+### Merged from upstream
+
+- Search pages cancel obsolete requests, reuse cached results, and bound
+  stalled API and token requests, with honest queued, cooldown and quota
+  messages instead of silent dead ends.
+- An optional personal Spotify Developer app client ID in Settings gives your
+  account its own rate-limit quota, with invalid IDs rejected visibly and
+  OAuth identities kept isolated per client.
+- A setting to download no artwork at all, with compact text-only lists when
+  it is off, and artwork requests and animation now pause while hidden.
+- Failed artwork downloads are retried after transient network failures.
+- An optional spinning vinyl record for the mini-player artwork.
+- A setting to hide the lyrics button, and one for a fixed bar width so
+  neighbouring bar widgets stop shifting between songs.
+- The bar layout adapts cleanly at narrow panel widths, and in-panel popups
+  stay opaque on translucent themes.
+- Manual pagination past 200 items is preserved, and collection filters scan
+  five pages at a time with Continue and Cancel controls.
+- Global player shortcuts route through one shared owner to the focused
+  monitor, and the keyring no longer waits forever.
+- Local playback bounds its backend restart loop, reports safe startup
+  failures, and offers an explicit Stop action that survives reopening.
+- The local receiver activates before backend transport controls, and slow
+  Avahi resolves no longer drop nearby Connect speakers.
+- Server Retry-After delays above 30 seconds are honoured instead of capping.
+- Pinned validation CI now runs real Quickshell authorization and app smoke
+  tests, and installs the native helper dependencies it needs.

@@ -4,7 +4,7 @@ set -euo pipefail
 source_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 action=${1:-}
 if (( $# != 1 )); then
-  echo "Usage: scripts/playback-runtime.sh check|credentials|start|stop|status|unit" >&2
+  echo "Usage: scripts/playback-runtime.sh check|credentials|start|start-explicit|stop|status|failure|unit" >&2
   exit 2
 fi
 
@@ -63,11 +63,22 @@ case $action in
     done
     exit 1
     ;;
-  start)
+  start|start-explicit)
     unit=$(preferred_unit) || {
       echo "playback-runtime.sh: no installed playback runtime is available" >&2
       exit 1
     }
+    failure_path="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-spotify/startup-error.json"
+    if [[ $action == start-explicit ]]; then
+      rm -f -- "$failure_path"
+      systemctl --user reset-failed "$unit" || true
+    else
+      failure_code=$(jq -r '.code // ""' "$failure_path" 2>/dev/null || true)
+      case $failure_code in
+        invalid_configuration|missing_credentials|reconnect_exhausted) exit 75 ;;
+      esac
+      [[ $(systemctl --user show "$unit" -p Result --value) != start-limit-hit ]] || exit 75
+    fi
     systemctl --user start "$unit"
     ;;
   stop)
@@ -76,6 +87,14 @@ case $action in
   status)
     unit=$(preferred_unit) || exit 1
     systemctl --user is-active "$unit"
+    ;;
+  failure)
+    unit=$(preferred_unit) || exit 1
+    if [[ $(systemctl --user show "$unit" -p Result --value) == start-limit-hit ]]; then
+      echo restart_limit
+    else
+      jq -r '.code // ""' "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-spotify/startup-error.json" 2>/dev/null || true
+    fi
     ;;
   unit)
     preferred_unit

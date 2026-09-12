@@ -1,0 +1,40 @@
+name: Validate plugin
+"on":
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel@sha256:84cd9ef000b3cff245ec028e87965b84724f4bf1cc63fc2741ba927b88515ed6
+    env:
+      CARGO_TARGET_DIR: /tmp/spotify-target
+      OMARCHY_PATH: /usr/share/omarchy
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Install snapshot dependencies
+        run: |
+          echo 'Server = https://archive.archlinux.org/repos/2026/09/07/$repo/os/$arch' > /etc/pacman.d/mirrorlist
+          pacman -Syyuu --noconfirm
+          pacman -S --needed --noconfirm git jq ripgrep python qt6-declarative quickshell libpulse openssl pkgconf rustup dbus socat xdg-utils avahi libgcrypt
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Install supported Omarchy source and Rust toolchain
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/basecamp/omarchy.git /usr/share/omarchy
+          git -C /usr/share/omarchy checkout 97a86af116b71ffd6b6dd0afc27cdefce5cacee2
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.97.1
+          echo '/usr/share/omarchy/bin' >> "$GITHUB_PATH"
+          echo '/usr/lib/qt6/bin' >> "$GITHUB_PATH"
+      - name: Validate the exact checkout
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          mkdir -p /tmp/spotify-runtime
+          chmod 700 /tmp/spotify-runtime
+          export XDG_RUNTIME_DIR=/tmp/spotify-runtime
+          bash scripts/test.sh

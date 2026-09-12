@@ -199,7 +199,7 @@ TestCase {
     verify(!Api.pendingSliderVolumeShouldHold(0.55, pending, 2000))
     verify(!Api.pendingSliderVolumeShouldHold(0.5, pending, 9000))
     verify(!Api.pendingSliderVolumeShouldHold(0.5, null, 2000))
-    compare(Api.SEARCH_DEBOUNCE_MS, 600)
+    compare(Api.SEARCH_DEBOUNCE_MS, 300)
     compare(Api.SEARCH_REQUEST_TIMEOUT_MS, 8000)
     compare(Api.VOLUME_FLUSH_MS, 80)
   }
@@ -1194,6 +1194,18 @@ TestCase {
       { id: "different", type: "Speaker" }, 0))
   }
 
+  function test_searchTypeLoading_normalizesAndCachesEachCategory() {
+    compare(Api.normalizedSearchType("album"), "album")
+    compare(Api.normalizedSearchType("episode"), "episode")
+    compare(Api.normalizedSearchType("unknown"), "track")
+    compare(Api.normalizedSearchType(""), "track")
+    verify(Api.searchNeedsLoad("miles", "", false))
+    verify(Api.searchNeedsLoad(" miles ", "coltrane", true))
+    verify(Api.searchNeedsLoad("miles", "miles", false))
+    verify(!Api.searchNeedsLoad("miles", "miles", true))
+    verify(!Api.searchNeedsLoad("   ", "", false))
+  }
+
   function test_shallowCopyAndAssign_copyWithoutSharingIdentity() {
     var source = { name: "Work", volume: 12 }
     var copy = Api.shallowCopy(source)
@@ -1211,7 +1223,7 @@ TestCase {
     compare(Api.rateLimitRetryMs("0"), 1400)
     compare(Api.rateLimitRetryMs("1"), 1400)
     compare(Api.rateLimitRetryMs("1", 2), 4400)
-    compare(Api.rateLimitRetryMs("120"), 30000)
+    compare(Api.rateLimitRetryMs("120"), 120400)
     compare(Api.rateLimitRetryMs(""), 10000)
     compare(Api.rateLimitRetryMs("Wed, 21 Oct 2015 07:28:00 GMT"), 10000)
     compare(Api.apiCooldownMs(1000, 1500), 500)
@@ -1225,6 +1237,32 @@ TestCase {
       }
     }), "10")
     verify(Api.localSocketFallbackMessage().indexOf("local player") >= 0)
+  }
+
+  function test_rateLimitRetryMs_data() {
+    return [
+      { tag: "below-cap", header: "29", attempt: 0, expected: 29400 },
+      { tag: "at-cap", header: "30", attempt: 0, expected: 30400 },
+      { tag: "above-cap", header: "31", attempt: 0, expected: 31400 },
+      { tag: "two-minutes", header: "120", attempt: 0, expected: 120400 },
+      { tag: "one-hour", header: "3600", attempt: 0, expected: 3600400 },
+      { tag: "backoff-capped", header: "1", attempt: 10, expected: 30400 },
+      { tag: "header-exceeds-backoff", header: "120", attempt: 10, expected: 120400 },
+      { tag: "zero", header: "0", attempt: 0, expected: 1400 },
+      { tag: "missing", header: "", attempt: 0, expected: 10000 },
+      { tag: "invalid", header: "invalid", attempt: 0, expected: 10000 },
+      { tag: "negative", header: "-1", attempt: 0, expected: 10000 },
+      { tag: "nonfinite", header: "Infinity", attempt: 0, expected: 10000 }
+    ]
+  }
+
+  function test_rateLimitRetryMs(data) {
+    compare(Api.rateLimitRetryMs(data.header, data.attempt), data.expected)
+  }
+
+  function test_longRateLimitDoesNotShortenExistingDeadline() {
+    compare(Api.nextRateLimitedUntil(1000, "120", 200000), 200000)
+    compare(Api.nextRateLimitedUntil(1000, "120", 4000), 121400)
   }
 
   function test_apiRequestQueue_ordersMutationsAndSkipsAborted() {
@@ -2141,7 +2179,7 @@ TestCase {
     var active = { id: "phone", active: true }
     var fallback = { id: "omarchy", active: false }
 
-    compare(Api.playbackTargetDeviceId(active, false), "")
+    compare(Api.playbackTargetDeviceId(active, false), "phone")
     compare(Api.playbackTargetDeviceId(active, true), "phone")
     compare(Api.playbackTargetDeviceId(fallback, false), "omarchy")
     compare(Api.playbackTargetDeviceId(null, false), "")
@@ -2157,7 +2195,7 @@ TestCase {
 
     compare(Api.preferredPlaybackDevice([speaker, local], "", false).id,
       "speaker")
-    compare(Api.playbackTargetDeviceId(speaker, false), "")
+    compare(Api.playbackTargetDeviceId(speaker, false), "speaker")
   }
 
   function test_unavailableExplicitDeviceFallsBackToLocal() {
@@ -2885,5 +2923,96 @@ TestCase {
       songsNext: "more-songs", albums: [1], albumsNext: "more-albums" }, 2)
     compare(mixed.songsNext, "")
     compare(mixed.albumsNext, "more-albums")
+  }
+
+  function test_opaqueSurface_floorsAlphaAndKeepsHue() {
+    var glass = Qt.rgba(0.95, 0.95, 0.97, 0.3)
+    var floored = Api.opaqueSurface(glass, 0.96)
+    fuzzyCompare(floored.a, 0.96, 0.001)
+    fuzzyCompare(floored.r, 0.95, 0.001)
+    fuzzyCompare(floored.b, 0.97, 0.001)
+    var solid = Qt.rgba(0.1, 0.1, 0.1, 1)
+    compare(Api.opaqueSurface(solid, 0.96), solid)
+    compare(Api.opaqueSurface(null, 0.96), null)
+  }
+
+  function test_barSlotWidth_fixedReservesTheCapAndCappedTrimsOnly() {
+    compare(Api.barSlotWidth(false, 240, 180, 32), 180)
+    compare(Api.barSlotWidth(false, 240, 400, 32), 240)
+    compare(Api.barSlotWidth(true, 240, 180, 32), 240)
+    compare(Api.barSlotWidth(true, 240, 400, 32), 240)
+    compare(Api.barSlotWidth(true, 0, 180, 32), 180)
+    compare(Api.barSlotWidth(false, 0, 400, 32), 400)
+    compare(Api.barSlotWidth(true, 240, 0, 32), 240)
+    compare(Api.barSlotWidth(false, 240, 10, 32), 32)
+    compare(Api.barSlotWidth(false, "240", "180", "32"), 180)
+  }
+
+  function test_resumeCandidateFromRecentlyPlayed_keepsPlaylistContext() {
+    var candidate = Api.resumeCandidateFromRecentlyPlayed({
+      items: [{
+        played_at: "2026-09-05T09:00:00Z",
+        context: { type: "playlist", uri: "spotify:playlist:abc" },
+        track: {
+          id: "t1", uri: "spotify:track:t1", name: "Blue in Green",
+          type: "track", artists: [{ name: "Miles Davis" }],
+          album: { name: "Kind of Blue", images: [] }
+        }
+      }]
+    }, 96)
+    compare(candidate.item.uri, "spotify:track:t1")
+    compare(candidate.item.name, "Blue in Green")
+    compare(candidate.item.subtitle, "Miles Davis")
+    compare(candidate.contextUri, "spotify:playlist:abc")
+    compare(candidate.playedAt, "2026-09-05T09:00:00Z")
+  }
+
+  function test_resumeCandidateFromRecentlyPlayed_dropsUnplayableContexts() {
+    var artist = Api.resumeCandidateFromRecentlyPlayed({
+      items: [{
+        context: { type: "artist", uri: "spotify:artist:x" },
+        track: { id: "t2", uri: "spotify:track:t2", name: "So What", type: "track" }
+      }]
+    }, 96)
+    compare(artist.item.uri, "spotify:track:t2")
+    compare(artist.contextUri, "")
+    var collection = Api.resumeCandidateFromRecentlyPlayed({
+      items: [{
+        context: { type: "collection", uri: "spotify:user:me:collection" },
+        track: { id: "t3", uri: "spotify:track:t3", name: "Freddie", type: "track" }
+      }]
+    }, 96)
+    compare(collection.contextUri, "")
+  }
+
+  function test_resumeCandidateFromRecentlyPlayed_skipsBrokenEntries() {
+    compare(Api.resumeCandidateFromRecentlyPlayed(null, 96), null)
+    compare(Api.resumeCandidateFromRecentlyPlayed({ items: [] }, 96), null)
+    var candidate = Api.resumeCandidateFromRecentlyPlayed({
+      items: [
+        null,
+        { track: { name: "No uri", type: "track" } },
+        { track: { id: "t4", uri: "spotify:track:t4", name: "Ok", type: "track" } }
+      ]
+    }, 96)
+    compare(candidate.item.uri, "spotify:track:t4")
+  }
+
+  function test_resumePlaybackAvailable_needsIdleReceiverAndCandidate() {
+    var candidate = { item: { uri: "spotify:track:t1", name: "x" } }
+    compare(Api.resumePlaybackAvailable(false, candidate), true)
+    compare(Api.resumePlaybackAvailable(true, candidate), false)
+    compare(Api.resumePlaybackAvailable(false, null), false)
+    compare(Api.resumePlaybackAvailable(false, { item: null }), false)
+    compare(Api.resumePlaybackAvailable(false, { item: { uri: "" } }), false)
+  }
+
+  function test_idleMediaText_prefersLiveThenLastPlayedThenLabel() {
+    var item = { name: "Blue in Green", subtitle: "Miles Davis", imageUrl: "" }
+    compare(Api.idleMediaText("Live", item, "name", "Nothing playing"), "Live")
+    compare(Api.idleMediaText("", item, "name", "Nothing playing"), "Blue in Green")
+    compare(Api.idleMediaText("", item, "imageUrl", ""), "")
+    compare(Api.idleMediaText("", null, "name", "Nothing playing"), "Nothing playing")
+    compare(Api.idleMediaText("", item, "missing", ""), "")
   }
 }

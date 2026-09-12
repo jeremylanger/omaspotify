@@ -22,6 +22,7 @@ BorderSurface {
   property bool browseOnActivate: false
   property bool reorderEnabled: false
   property bool reorderDragging: false
+  property bool artworkEnabled: true
   property int reorderDropIndicator: 0
   property bool hovered: hoverHandler.hovered
   property bool actionsExpanded: false
@@ -47,7 +48,7 @@ BorderSurface {
     + Math.max(0, fullActionCount - 1) * Style.space(2)
   readonly property real titleWidthWithFullActions: Math.max(0,
     contentRow.width - artworkSurface.width - durationColumn.width
-      - fullActionWidth - contentRow.spacing * 3)
+      - fullActionWidth - contentRow.spacing * (artworkSurface.visible ? 3 : 2))
   readonly property bool compactActions: Api.mediaRowShouldCompact(
     titleMetrics.advanceWidth, titleWidthWithFullActions, fullActionCount)
 
@@ -76,7 +77,7 @@ BorderSurface {
 
   width: parent ? parent.width : implicitWidth
   implicitWidth: Style.space(420)
-  implicitHeight: Style.space(46)
+  implicitHeight: root.artworkEnabled ? Style.space(46) : Style.space(44)
   height: implicitHeight
   radius: Style.cornerRadius
   color: selected || reorderDragging
@@ -171,20 +172,22 @@ BorderSurface {
 
     BorderSurface {
       id: artworkSurface
-      width: Style.space(32)
+      width: root.artworkEnabled ? Style.space(32) : 0
       height: width
       anchors.verticalCenter: parent.verticalCenter
+      visible: root.artworkEnabled
       radius: Style.spacing.labelGap
       color: Style.normalFillFor(root.foreground, root.accent)
       borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
 
-      Image {
+      RetryImage {
         id: rowArtwork
         anchors.fill: parent
         anchors.margins: Style.space(2)
-        source: root.itemData && root.itemData.imageUrl
+        requestedSource: root.artworkEnabled && root.itemData && root.itemData.imageUrl
           ? (root.service ? root.service.artworkFor(root.itemData.imageUrl)
             : root.itemData.imageUrl) : ""
+        retryLimit: 4
         sourceSize.width: 112
         sourceSize.height: 112
         fillMode: Image.PreserveAspectFit
@@ -213,7 +216,8 @@ BorderSurface {
 
     Column {
       width: Math.max(20, parent.width - artworkSurface.width
-        - durationColumn.width - actionRow.width - parent.spacing * 3)
+        - durationColumn.width - actionRow.width
+        - parent.spacing * (artworkSurface.visible ? 3 : 2))
       anchors.verticalCenter: parent.verticalCenter
       spacing: Style.space(3)
 
@@ -274,7 +278,6 @@ BorderSurface {
         id: saveButton
         objectName: "media-row-save"
         visible: root.saveActionVisible
-          && (!root.compactActions || root.actionsExpanded)
         iconText: "󰋑"
         foreground: Color.urgent
         accent: Color.urgent

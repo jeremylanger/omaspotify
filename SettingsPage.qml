@@ -256,6 +256,52 @@ Item {
           spacing: Style.space(6)
 
           Text {
+            text: "PERSONAL SPOTIFY APP · OPTIONAL"
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          TextField {
+            width: parent.width
+            foreground: page.panel.foreground
+            placeholderText: "Leave empty to use the shared app"
+            text: page.panel.draftClientId
+            onTextEdited: page.panel.draftClientId = text
+          }
+
+          Text {
+            width: parent.width
+            text: page.panel.draftClientId.trim()
+                  && !/^[0-9a-f]{32}$/i.test(page.panel.draftClientId.trim())
+              ? "Enter a client ID with exactly 32 hexadecimal characters."
+              : "Uses your developer app's quota. Changing this clears the current session and requires authorization for the selected app."
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          Button {
+            text: "Apply app"
+            foreground: page.panel.foreground
+            enabled: page.panel.service
+              && (page.panel.draftClientId.trim() === ""
+                || /^[0-9a-f]{32}$/i.test(page.panel.draftClientId.trim()))
+              && page.panel.draftClientId.trim().toLowerCase()
+                !== String(page.panel.service.settings.clientId || "")
+            onClicked: page.panel.service.persistSettings({
+              clientId: page.panel.draftClientId.trim()
+            })
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+
+          Text {
             text: "BAR PLAYER"
             color: page.panel.muted
             font.family: page.panel.fontFamily
@@ -276,6 +322,30 @@ Item {
               page.panel.draftShowMiniPlayer = !page.panel.draftShowMiniPlayer
               page.panel.persistDraftSettings()
             }
+          }
+
+          Button {
+            text: "Spinning vinyl artwork · "
+              + (page.panel.draftShowVinylRecord ? "On" : "Off")
+            iconText: "󰎈"
+            foreground: page.panel.foreground
+            selected: page.panel.draftShowVinylRecord
+            tooltipText: page.panel.draftShowVinylRecord
+              ? "Show spinning vinyl artwork in the mini-player"
+              : "Show the original rectangular artwork in the mini-player"
+            onClicked: {
+              page.panel.draftShowVinylRecord = !page.panel.draftShowVinylRecord
+              page.panel.persistDraftSettings()
+            }
+          }
+
+          Text {
+            width: parent.width
+            text: "Adds a spinning vinyl record for the mini-player artwork while music is playing."
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
           }
         }
 
@@ -325,9 +395,69 @@ Item {
             }
           }
 
+          Button {
+            text: "Lyrics button · "
+              + (page.panel.draftShowLyrics ? "On" : "Off")
+            iconText: "󰑬"
+            foreground: page.panel.foreground
+            selected: page.panel.draftShowLyrics
+            tooltipText: page.panel.draftShowLyrics
+              ? "Show the Omasing lyrics button in the player and mini-player"
+              : "Hide the lyrics button and disable Ctrl+Shift+L"
+            onClicked: {
+              page.panel.draftShowLyrics = !page.panel.draftShowLyrics
+              page.panel.persistDraftSettings()
+            }
+          }
+
+          Text {
+            width: parent.width
+            text: "Hide the lyrics button if you do not use Omasing. Playback is unaffected, and the button returns whenever you turn this back on."
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
           Text {
             width: parent.width
             text: "After a shortcut or Tab, matching buttons glow and show the next key. Hold Ctrl, Shift, or Alt to see those chords, or press Ctrl+H to turn them off. Turn them on here again whenever you want the overlay back."
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+
+          Text {
+            text: "ARTWORK"
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          Button {
+            text: "Artwork · " + (page.panel.draftShowArtwork ? "On" : "Off")
+            iconText: "󰀥"
+            foreground: page.panel.foreground
+            selected: page.panel.draftShowArtwork
+            tooltipText: page.panel.draftShowArtwork
+              ? "Album and playlist covers are shown"
+              : "Covers are hidden and the space is given to text"
+            onClicked: {
+              page.panel.draftShowArtwork = !page.panel.draftShowArtwork
+              page.panel.persistDraftSettings()
+            }
+          }
+
+          Text {
+            width: parent.width
+            text: "Turn off to stop downloading album and playlist covers. The app becomes text-only."
             color: page.panel.muted
             font.family: page.panel.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -397,6 +527,20 @@ Item {
                 : "Scroll bar text only when it is too wide to fit"
               onClicked: {
                 page.panel.draftScrollBarText = !page.panel.draftScrollBarText
+                page.panel.persistDraftSettings()
+              }
+            }
+            Button {
+              text: "Fixed width · " + (page.panel.draftFixedBarWidth ? "On" : "Off")
+              foreground: page.panel.foreground
+              selected: page.panel.draftFixedBarWidth
+              enabled: Api.canScrollBarText(page.panel.draftShowTitle, page.panel.draftShowArtist)
+                && !page.panel.barTextWidthUnlimited
+              tooltipText: page.panel.barTextWidthUnlimited
+                ? "Unavailable while the bar width is unlimited"
+                : "Always reserve the full width while a track is shown, so the bar does not shift between songs"
+              onClicked: {
+                page.panel.draftFixedBarWidth = !page.panel.draftFixedBarWidth
                 page.panel.persistDraftSettings()
               }
             }

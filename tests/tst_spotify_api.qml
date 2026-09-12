@@ -46,6 +46,7 @@ TestCase {
     var xhr = {
       readyState: XMLHttpRequest.UNSENT,
       status: 0,
+      retryAfter: "1",
       responseText: "",
       url: "",
       method: "",
@@ -59,7 +60,7 @@ TestCase {
       },
       setRequestHeader: function() {},
       getResponseHeader: function(name) {
-        return String(name).toLowerCase() === "retry-after" ? "1" : ""
+        return String(name).toLowerCase() === "retry-after" ? this.retryAfter : ""
       },
       send: function() {
         if (testCase.failSend) throw new Error("send failed")
@@ -107,19 +108,27 @@ TestCase {
     verify(requests[limit + 1].url.indexOf("/search") >= 0)
   }
 
-  function test_searchKeepsTheExistingAllTypesRequest() {
+  function test_searchRequestsOnlyTheSelectedType() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
     var callbacks = 0
-    api.search("miles davis", function(groups, error) {
+    api.search("miles davis", "album", function(groups, error) {
       callbacks++
       compare(error, "")
     })
     compare(requests.length, 1)
-    verify(decodeURIComponent(requests[0].url).indexOf(
-      "type=track,artist,album,playlist,show,episode,audiobook") >= 0)
-    complete(requests[0], 200, "{\"tracks\":{\"items\":[]}}")
+    verify(requests[0].url.indexOf("type=album") >= 0)
+    verify(requests[0].url.indexOf("artist%2Calbum") < 0)
+    complete(requests[0], 200, "{\"albums\":{\"items\":[]}}")
     compare(callbacks, 1)
+  }
+
+  function test_searchFallsBackToTracksForAnInvalidType() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.search("miles davis", "unknown", function() {})
+    compare(requests.length, 1)
+    verify(requests[0].url.indexOf("type=track") >= 0)
   }
 
   function test_searchTimeoutAbortsAndReleasesSlotOnce() {
@@ -127,7 +136,7 @@ TestCase {
     verify(api)
     var callbacks = 0
     var error = ""
-    api.search("stalled", function(groups, reason) {
+    api.search("stalled", "track", function(groups, reason) {
       callbacks++
       error = reason
     })
@@ -151,7 +160,7 @@ TestCase {
     var limit = fillEverySlot(api)
     compare(api.requestsInFlight, limit)
     var error = ""
-    api.search("queued", function(groups, reason) { error = reason })
+    api.search("queued", "track", function(groups, reason) { error = reason })
     compare(requests.length, limit)
     compare(api.requestQueue.length, 1)
     clock = 9000
@@ -161,12 +170,80 @@ TestCase {
     compare(api.requestsInFlight, limit)
   }
 
+  function test_searchBlockedByCooldownReportsRemainingWait() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.rateLimitedUntil = 15000
+    var errors = []
+    api.search("waiting", "track", function(groups, error) { errors.push(error) })
+    compare(requests.length, 1,
+      "the first interactive job may probe a cooldown instead of waiting it out")
+    complete(requests[0], 429, "{\"error\":{\"message\":\"Too many requests\"}}")
+    compare(errors.length, 1)
+    verify(errors[0].indexOf("Spotify is busy") >= 0,
+      "the refused probe reports the wait honestly")
+    compare(api.requestQueue.length, 0)
+    compare(api.timedJobs.length, 0)
+    compare(api.requestsInFlight, 0)
+  }
+
+  function test_inFlightSearchStillReportsTimeoutDuringAnotherCooldown() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var error = ""
+    api.search("sent", "track", function(groups, reason) { error = reason })
+    api.rateLimitedUntil = 15000
+    clock = 9000
+    api.expireTimedOutRequests(clock)
+    compare(error, "Spotify took too long to respond. Try again.")
+    verify(requests[0].aborted)
+  }
+
+  function test_cooldownCanExpireBeforeSearchDeadline() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.rateLimitedUntil = 4000
+    var errors = []
+    api.search("waiting", "track", function(groups, error) { errors.push(error) })
+    clock = 4000
+    api.pumpRequests()
+    compare(requests.length, 1)
+    complete(requests[0], 200, "{\"tracks\":{\"items\":[]}}")
+    clock = 9000
+    api.expireTimedOutRequests(clock)
+    compare(errors, [""])
+  }
+
+  function test_cancelledSearchDuringCooldownHasNoStaleError() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.rateLimitedUntil = 15000
+    var oldCalls = 0
+    var newErrors = []
+    api.search("old", "track", function() { oldCalls++ })
+    clock = 2000
+    api.search("new", "track", function(groups, error) { newErrors.push(error) })
+    verify(requests[0].aborted, "a newer search cancels the probe")
+    compare(requests.length, 2)
+    complete(requests[1], 429, "{\"error\":{\"message\":\"Too many requests\"}}")
+    compare(oldCalls, 0)
+    compare(newErrors.length, 1)
+    verify(newErrors[0].indexOf("Spotify is busy") >= 0)
+    compare(api.requestsInFlight, 0)
+  }
+
+  function test_expiredCooldownDoesNotMislabelQueuedTimeout() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.rateLimitedUntil = 9000
+    var error = ""
+    api.search("waiting", "track", function(groups, reason) { error = reason })
+    clock = 9000
+    api.expireTimedOutRequests(clock)
+    compare(error, "Spotify took too long to respond. Try again.")
+  }
+
   function test_search429ReturnsWithoutSilentRetry() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
     var callbacks = 0
     var error = ""
-    api.search("busy", function(groups, reason) {
+    api.search("busy", "track", function(groups, reason) {
       callbacks++
       error = reason
     })
@@ -229,6 +306,82 @@ TestCase {
     compare(callbacks, 1)
   }
 
+  function test_long429BlocksRetryAndOtherRequestsUntilDeadline() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    var callbacks = 0
+    api.request("GET", "/me", null, null, function() { callbacks++ })
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    compare(api.rateLimitedUntil, 121400)
+    api.request("GET", "/me/albums", null, null, function() { callbacks++ })
+
+    clock = 31000
+    api.pumpRequests()
+    compare(requests.length, 1)
+    clock = 121399
+    api.pumpRequests()
+    compare(requests.length, 1)
+    compare(callbacks, 0)
+
+    clock = 121400
+    api.pumpRequests()
+    // The first retry stays serial until a successful response clears 429 mode.
+    compare(requests.length, 2)
+    complete(requests[1], 200)
+    compare(requests.length, 3)
+    complete(requests[2], 200)
+    compare(callbacks, 2)
+    compare(api.requestQueue.length, 0)
+  }
+
+  function test_cooldownLongerThanTimerRangeRechecksWithoutDispatchingEarly() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.request("GET", "/me", null, null, function() {})
+    requests[0].retryAfter = "3000000"
+    complete(requests[0], 429)
+    var deadline = 3000001400
+    compare(api.rateLimitedUntil, deadline)
+    var timer = findChild(api, "rateLimitTimer")
+    verify(timer)
+    compare(timer.interval, 2147483647)
+    verify(timer.running)
+
+    clock = 1000 + 2147483647
+    timer.triggered()
+    compare(requests.length, 1)
+    compare(api.rateLimitedUntil, deadline)
+    compare(timer.interval, deadline - clock)
+    verify(timer.interval > 0)
+
+    clock = deadline - 1
+    timer.triggered()
+    compare(requests.length, 1)
+    clock = deadline
+    timer.triggered()
+    compare(requests.length, 2)
+    complete(requests[1], 200)
+  }
+
+  function test_longSearch429DoesNotSilentlyRetry() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    var callbacks = 0
+    api.search("busy", "track", function(groups, error) {
+      callbacks++
+      verify(error.indexOf("120 seconds") >= 0)
+    })
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    compare(callbacks, 1)
+    compare(api.requestQueue.length, 0)
+    clock = 121400
+    api.pumpRequests()
+    compare(requests.length, 1)
+    compare(callbacks, 1)
+  }
+
   function test_401RetriesWithOneTokenInvalidation() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
@@ -250,9 +403,9 @@ TestCase {
     verify(api)
     var staleCalls = 0
     var currentCalls = 0
-    api.search("old", function() { staleCalls++ })
+    api.search("old", "track", function() { staleCalls++ })
     var oldRequest = requests[0]
-    api.search("new", function() { currentCalls++ })
+    api.search("new", "artist", function() { currentCalls++ })
     verify(oldRequest.aborted)
     compare(requests.length, 2)
     complete(oldRequest, 200, "{\"tracks\":{\"items\":[]}}")
@@ -287,7 +440,8 @@ TestCase {
     complete(requests[0], 200)
     compare(requests.length, limit)
     compare(callbacks, 0)
-    compare(api.timedJobs.length, 0)
+    compare(api.timedJobs.length, limit - 1,
+      "the still-running fills keep their deadlines; the aborted one drops its")
   }
 
   // A cancelled background request has to hand its slot back, or the library
@@ -379,5 +533,50 @@ TestCase {
       compare(api.requestsInFlight, 0)
       api.destroy()
     }
+  }
+
+  function test_backgroundWatchdogReleasesSlots() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var calls = 0
+    api.request("GET", "/me", null, null, function() { calls++ })
+    api.request("GET", "/me/player", null, null, function() { calls++ })
+    clock = 16000
+    api.expireTimedOutRequests(clock)
+    compare(calls, 2)
+    compare(api.requestsInFlight, 0)
+    verify(requests[0].aborted)
+    complete(requests[0], 200)
+    compare(calls, 2)
+  }
+
+  function test_backgroundCooldownDoesNotConsumeActiveTimeout() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.rateLimitedUntil = 121000
+    var calls = 0
+    api.request("GET", "/me", null, null, function() { calls++ })
+    clock = 120000
+    api.expireTimedOutRequests(clock)
+    compare(calls, 0)
+    compare(requests.length, 0)
+    clock = 121000
+    api.pumpRequests()
+    compare(requests.length, 1)
+    api.expireTimedOutRequests(clock)
+    compare(calls, 0)
+    complete(requests[0], 200)
+    compare(calls, 1)
+  }
+
+  function test_quotaExceededDoesNotRetryOrInventCooldown() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var error = ""
+    api.request("GET", "/search?q=private-query", null, null,
+      function(status, payload, reason) { error = reason })
+    complete(requests[0], 429, '{"error":{"reason":"QUOTA_EXCEEDED"}}')
+    verify(error.indexOf("developer quota") >= 0)
+    compare(api.rateLimitedUntil, 0)
+    compare(api.requestQueue.length, 0)
+    compare(api.diagnostics[0].route, "/search")
+    verify(JSON.stringify(api.diagnostics).indexOf("private-query") < 0)
   }
 }

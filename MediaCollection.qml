@@ -30,6 +30,8 @@ Item {
   property bool restoreApplied: false
   property bool keyboardSortSelected: false
   property bool keyboardMoreSelected: false
+  property bool keyboardFilterScanSelected: false
+  property string keyboardFilterScanHint: ""
   property string keyboardSortHint: ""
   property string keyboardMoreHint: ""
   property string keyboardListHint: ""
@@ -81,6 +83,23 @@ Item {
   signal reorderRequested(int sourceIndex, int destinationIndex)
   signal loadMoreRequested()
   signal viewStateChanged(string filterText, string sortKey, real contentY)
+
+  readonly property bool filterScanAvailable: scanner.available
+  readonly property bool filterScanPaused: scanner.paused
+  function continueFilterScan() { scanner.resume() }
+  function cancelFilterScan() { scanner.cancel() }
+  FilterScanController {
+    id: scanner
+    query: root.filterText
+    active: root.visible && root.service && root.service.uiVisible
+    loading: root.loading
+    hasMore: root.hasMore
+    itemCount: root.sourceItems.length
+    cooldownUntil: root.service ? root.service.searchCooldownUntil : 0
+    blocked: !root.service || !root.service.accountConnected
+      || root.service.lastError !== ""
+    onRequestNext: root.loadMoreRequested()
+  }
 
   function sortLabel() {
     if (sortKey === "name") return "Title"
@@ -369,7 +388,7 @@ Item {
       id: mediaList
       width: parent.width
       height: Math.max(30, parent.height - tools.height - moreButton.height
-        - emptyLabel.height - parent.spacing * 3)
+        - emptyLabel.height - filterProgress.height - parent.spacing * 4)
       model: root.visibleItems
       clip: true
       spacing: Style.space(3)
@@ -428,6 +447,7 @@ Item {
           && root.dragSourceIndex !== index
           ? (index < root.dragSourceIndex ? -1 : 1) : 0
         saved: root.service ? root.service.isSaved(modelData) : false
+        artworkEnabled: !root.service || root.service.artworkEnabled
         ShortcutHint {
           ctrlHeld: root.keyboardCtrlHeld
           shiftHeld: root.keyboardShiftHeld
@@ -484,6 +504,30 @@ Item {
       font.pixelSize: Style.font.bodySmall
       horizontalAlignment: Text.AlignHCenter
       wrapMode: Text.WordWrap
+    }
+
+    Flow {
+      id: filterProgress
+      width: parent.width
+      height: visible ? implicitHeight : 0
+      visible: root.filterText.trim() !== "" && root.hasMore
+      spacing: Style.space(6)
+      Text {
+        text: "Filtering " + root.sourceItems.length + " loaded items. More remain."
+        color: Color.muted
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        width: Math.min(implicitWidth, parent.width)
+        wrapMode: Text.WordWrap
+      }
+      Button {
+        text: scanner.paused ? "Continue scan" : "Cancel scan"
+        enabled: !scanner.blocked && !scanner.waitingForCooldown
+        hasCursor: root.keyboardFilterScanSelected
+        ShortcutHint { active: root.keyboardHintsActive; navHint: root.keyboardFilterScanHint }
+        foreground: Color.foreground
+        onClicked: scanner.paused ? scanner.resume() : scanner.cancel()
+      }
     }
 
     Button {

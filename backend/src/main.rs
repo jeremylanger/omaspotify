@@ -1,5 +1,6 @@
 mod config;
 mod engine;
+mod failure;
 mod mpris;
 mod protocol;
 mod socket;
@@ -40,11 +41,38 @@ enum Action {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+    let daemon = cli.action.is_none();
+    let socket = cli
+        .socket_path
+        .clone()
+        .unwrap_or_else(config::default_socket_path);
+    match launch(cli).await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            let kind = error
+                .downcast_ref::<failure::Failure>()
+                .copied()
+                .unwrap_or(failure::Failure::Transient);
+            if daemon {
+                let _ = failure::record(&socket, kind);
+            }
+            if daemon {
+                eprintln!("Playback failed: {kind}");
+            } else {
+                eprintln!("{error:#}");
+            }
+            std::process::ExitCode::from(kind.exit_code())
+        }
+    }
+}
+
+async fn launch(cli: Cli) -> Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let config_path = cli.config_path.unwrap_or_else(config::default_config_path);
-    let mut config = BackendConfig::load(&config_path)?;
+    let mut config =
+        BackendConfig::load(&config_path).context(failure::Failure::InvalidConfiguration)?;
     if let Some(device_name) = cli.device_name {
         let device_name = device_name.trim();
         if device_name.is_empty()
@@ -90,12 +118,13 @@ async fn run(config: BackendConfig, socket_path: PathBuf) -> Result<()> {
     };
 
     let _socket_guard = socket::serve(
-        socket_path,
+        socket_path.clone(),
         state.clone(),
         runtime.commands.clone(),
         shutdown_rx.clone(),
     )
     .await?;
+    failure::clear(&socket_path);
     let mut mpris_task = tokio::spawn(mpris::serve(
         state.clone(),
         runtime.commands.clone(),
