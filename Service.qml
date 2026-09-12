@@ -1049,9 +1049,15 @@ Item {
   }
 
   function configuredEntry() {
-    var config = shell && shell.shellConfig ? shell.shellConfig : null
-    if (!config) return null
-    var layout = config.bar && config.bar.layout ? config.bar.layout : null
+    // Third-party plugins no longer receive the raw shellConfig; the host
+    // exposes only the public bar config via shell.barConfig. Without this,
+    // configuredEntry() always returned null and every bar-widget setting
+    // (show artist name, scroll speed, device name, ...) stayed stuck at
+    // its manifest default no matter what the user configured.
+    var barConfig = shell && shell.barConfig ? shell.barConfig
+      : (shell && shell.shellConfig && shell.shellConfig.bar ? shell.shellConfig.bar : null)
+    if (!barConfig) return null
+    var layout = barConfig.layout || null
     var sections = ["left", "center", "right"]
     if (layout) {
       for (var s = 0; s < sections.length; s++) {
@@ -1060,7 +1066,8 @@ Item {
           if (rows[i] && String(rows[i].id || "") === pluginId) return rows[i]
       }
     }
-    var plugins = Array.isArray(config.plugins) ? config.plugins : []
+    var config = shell && shell.shellConfig ? shell.shellConfig : null
+    var plugins = config && Array.isArray(config.plugins) ? config.plugins : []
     for (var p = 0; p < plugins.length; p++)
       if (plugins[p] && String(plugins[p].id || "") === pluginId) return plugins[p]
     return null
