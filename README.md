@@ -136,7 +136,7 @@ To replace Omarchy's existing **Super+Shift+M · Music** binding, add this to
 ```lua
   hl.unbind("SUPER + SHIFT + M") -- previously: Music
   o.bind("SUPER + SHIFT + M", "OmaSpotify",
-    "omarchy shell -q io.github.jeremylanger.omaspotify.player togglePlayer")
+    "omarchy shell -q quickshell.spotify.player togglePlayer")
 ```
 
 Run `hyprctl reload` and check `hyprctl configerrors` after saving. Until the
@@ -146,13 +146,13 @@ Settings choice below has no effect on the shortcut.
 In OmaSpotify's Settings, choose whether that shortcut launches Omarchy's
 Music app, toggles the full player, or toggles the mini-player. Separate
 bindings can call `toggleMiniPlayer` or `toggleFullPlayer` on the same
-`io.github.jeremylanger.omaspotify.player` target.
+`quickshell.spotify.player` target.
 
 Raise or lower Spotify volume from a keybinding without opening the player:
 
 ```bash
-omarchy shell -q io.github.jeremylanger.omaspotify.player volumeUp
-omarchy shell -q io.github.jeremylanger.omaspotify.player volumeDown
+omarchy shell -q quickshell.spotify.player volumeUp
+omarchy shell -q quickshell.spotify.player volumeDown
 ```
 
 Each step is 5%, the same as Ctrl+Up / Ctrl+Down. This changes Spotify's own
