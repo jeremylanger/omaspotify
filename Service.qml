@@ -23,11 +23,14 @@ Item {
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.jeremylanger.omaspotify"
   // The host strips __sourceDir from third-party manifests, so it is only ever
-  // populated for first-party plugins. Fall back to this file's own directory,
-  // which every host resolves identically and no host can withhold.
+  // populated for first-party plugins. The sanitization is intentional on
+  // Omarchy's side. Fall back to this file's own directory, which every host
+  // resolves identically and no host can withhold, then to the standard
+  // plugin install location.
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME")
+    || (homeDirectory ? homeDirectory + "/.config" : ".config")
   readonly property string pluginDir: manifest && manifest.__sourceDir
     ? String(manifest.__sourceDir) : localSourceDir()
-  readonly property string homeDirectory: Quickshell.env("HOME") || ""
   readonly property string stateHome: {
     var explicit = String(Quickshell.env("XDG_STATE_HOME") || "").trim()
     if (explicit) return explicit
@@ -1095,10 +1098,14 @@ Item {
   }
 
   // Qt.resolvedUrl(".") is this file's directory, so it survives a host that
-  // withholds the manifest's source path.
+  // withholds the manifest's source path. Installed plugins live under the
+  // standard user config location, which retains a usable path for helper
+  // scripts when the resolved url is not a plain file path.
   function localSourceDir() {
     var dir = String(Qt.resolvedUrl("."))
-    if (dir.indexOf("file://") === 0) dir = dir.substring(7)
+    if (dir.indexOf("file://") !== 0)
+      return configHome + "/omarchy/plugins/" + pluginId
+    dir = dir.substring(7)
     // A resolved url percent-encodes spaces and non-ascii names; the path is
     // handed to scripts, which want the literal directory.
     try { dir = decodeURIComponent(dir) } catch (e) {}
