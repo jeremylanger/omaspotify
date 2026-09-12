@@ -19,6 +19,8 @@ Item {
   property double lastVolumeAdjustAt: 0
   property string currentTab: "home"
   property bool openedForLogin: false
+  property bool nowPlayingExpanded: false
+  property string equalizerMode: "bars"
 
   property string searchText: ""
   property string searchType: "track"
@@ -442,6 +444,9 @@ Item {
     universalSearchActive = false
     restoreScrollPositions(state.scrollPositions)
     restoredPlaylistId = String(state.selectedPlaylistId || "")
+    equalizerMode = ["bars", "pixels", "scope", "matrix"]
+      .indexOf(String(state.equalizerMode || "")) >= 0
+      ? String(state.equalizerMode) : "bars"
     var restoredTab = String(state.tab || "home")
     if (["home", "discover", "search", "library", "playlists", "detail", "queue", "devices", "setup"]
         .indexOf(restoredTab) >= 0) currentTab = restoredTab
@@ -472,7 +477,8 @@ Item {
       scrollPositions: scrollPositions,
       detailItem: currentTab === "detail" && service.detailItem ? service.detailItem : null,
       selectedPlaylistId: service.selectedPlaylist ? service.selectedPlaylist.id : restoredPlaylistId,
-      lastRadioPlaylist: service.lastRadioPlaylist
+      lastRadioPlaylist: service.lastRadioPlaylist,
+      equalizerMode: equalizerMode
     })
   }
 
@@ -483,6 +489,7 @@ Item {
   }
 
   function openItem(item) {
+    nowPlayingExpanded = false
     if (!item) return
     if (item.type === "artist" && !item.id) {
       if (service) service.resolveArtist(item.name, function(resolved) {
@@ -525,6 +532,25 @@ Item {
   function openCurrentAlbum() {
     if (!service || !service.currentAlbumContextAvailable) return
     service.currentContext("album", function(item) { openItem(item) })
+  }
+
+  function toggleNowPlayingExpanded() {
+    if (currentTab === "login") return
+    nowPlayingExpanded = !nowPlayingExpanded
+    if (nowPlayingExpanded) setPanelCursor("footer", "play")
+  }
+
+  function cycleEqualizerMode() {
+    var modes = ["bars", "pixels", "scope", "matrix"]
+    var index = modes.indexOf(equalizerMode)
+    equalizerMode = modes[(index + 1) % modes.length]
+    persistUiState()
+  }
+
+  function collapseNowPlaying() {
+    if (!nowPlayingExpanded) return false
+    nowPlayingExpanded = false
+    return true
   }
 
   function goBack() {
@@ -904,13 +930,16 @@ Item {
   function footerCursorActions() {
     if (currentTab === "login") return []
     var actions = []
-    if (service && service.currentTrackSaveAvailable) actions.push("like")
-    if (service && service.currentTrackItem) actions.push("context")
-    if (service && service.currentArtistContextAvailable) actions.push("artist")
-    if (service && service.currentAlbumContextAvailable) actions.push("album")
+    if (!nowPlayingExpanded) {
+      if (service && service.currentTrackSaveAvailable) actions.push("like")
+      if (service && service.currentTrackItem) actions.push("context")
+      if (service && service.currentArtistContextAvailable) actions.push("artist")
+      if (service && service.currentAlbumContextAvailable) actions.push("album")
+    }
     if (service && service.playbackControllable)
       actions.push("shuffle", "previous", "play", "next", "repeat")
     if (service && service.lyricsAvailable) actions.push("lyrics")
+    actions.push("expand")
     if (service && service.lengthSeconds > 0 && service.playbackControllable)
       actions.push("seek")
     actions.push("devices", "sleep")
@@ -1165,6 +1194,7 @@ Item {
     else if (action === "next" && service) service.next()
     else if (action === "repeat" && service) service.cycleRepeat()
     else if (action === "lyrics") openLyrics()
+    else if (action === "expand") toggleNowPlayingExpanded()
     else if (action === "devices") chooseTab("devices")
     else if (action === "sleep") sleepPopup.open()
     else if (action === "volume") toggleMute()
@@ -1830,6 +1860,7 @@ Item {
   }
 
   function chooseTab(tab) {
+    nowPlayingExpanded = false
     if (!accountConnected) {
       currentTab = "login"
       openedForLogin = true
@@ -2971,6 +3002,11 @@ Item {
           event.accepted = true
           return
         }
+        if (root.collapseNowPlaying()) {
+          root.disarmEscapeClose()
+          event.accepted = true
+          return
+        }
         if (root.dismissSearch()) {
           event.accepted = true
           return
@@ -3134,6 +3170,24 @@ Item {
         }
       }
       Shortcut {
+        sequence: "V"
+        enabled: !root.shortcutsBlocked && !root.textInputFocused()
+          && root.nowPlayingExpanded
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.cycleEqualizerMode()
+        }
+      }
+      Shortcut {
+        sequence: "E"
+        enabled: !root.shortcutsBlocked && !root.textInputFocused()
+          && root.currentTab !== "login"
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.toggleNowPlayingExpanded()
+        }
+      }
+      Shortcut {
         sequence: "Ctrl+S"
         enabled: !root.shortcutsBlocked && !root.textInputFocused()
           && root.service && root.service.playbackControllable
@@ -3210,6 +3264,7 @@ Item {
 
         Row {
           id: workspace
+          visible: !root.nowPlayingExpanded
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
@@ -3780,6 +3835,153 @@ Item {
           }
         }
 
+        Item {
+          id: nowPlayingView
+          visible: root.nowPlayingExpanded && root.currentTab !== "login"
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.bottom: footerSeparator.top
+          anchors.bottomMargin: Style.space(10)
+
+          BorderSurface {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            color: Style.normalFillFor(root.foreground, root.accent)
+            borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
+
+            Item {
+              id: nowPlayingStage
+              anchors.fill: parent
+              anchors.margins: Style.space(22)
+              readonly property real artSize: Math.max(Style.space(120),
+                Math.min(height * 0.5, width * 0.34, Style.space(320)))
+
+              Row {
+                id: nowPlayingHero
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: nowPlayingStage.artSize
+                spacing: Style.space(24)
+
+                BorderSurface {
+                  id: nowPlayingHeroArt
+                  width: nowPlayingStage.artSize
+                  height: width
+                  radius: Style.cornerRadius
+                  color: Style.selectedFillFor(root.foreground, root.accent)
+                  borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
+
+                  Image {
+                    anchors.fill: parent
+                    anchors.margins: Style.space(2)
+                    source: root.service ? root.service.artUrl : ""
+                    sourceSize.width: 640
+                    sourceSize.height: 640
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    cache: true
+                    visible: status === Image.Ready
+                  }
+
+                  Text {
+                    anchors.centerIn: parent
+                    visible: !root.service || root.service.artUrl === ""
+                    text: "󰎈"
+                    color: root.muted
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.displayLarge
+                  }
+                }
+
+                Column {
+                  width: Math.max(80, parent.width - nowPlayingHeroArt.width - parent.spacing)
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(6)
+
+                  Text {
+                    width: parent.width
+                    text: root.service && root.service.title
+                      ? root.service.title : "Nothing playing"
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.displayLarge
+                    font.bold: true
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                  }
+
+                  ArtistLinks {
+                    width: parent.width
+                    artists: root.service ? root.service.currentArtists : []
+                    fallbackText: root.service && root.service.artist
+                      ? root.service.artist : "Choose something to play"
+                    fallbackClickable: root.service && root.service.artist !== ""
+                      && root.service.currentArtistContextAvailable
+                      && artists.length === 0
+                    color: root.service && root.service.artist
+                      && root.service.currentArtistContextAvailable ? root.accent
+                      : root.muted
+                    accent: root.accent
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.title
+                    maximumLineCount: 1
+                    elide: Text.ElideRight
+                    onArtistRequested: function(item) { root.openItem(item) }
+                    onFallbackRequested: root.openCurrentArtist()
+                  }
+
+                  Text {
+                    width: parent.width
+                    visible: root.service && root.service.album !== ""
+                    text: root.service ? root.service.album : ""
+                    color: root.muted
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.subtitle
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    visible: root.service && root.service.playbackDeviceName !== ""
+                    text: root.service
+                      ? ((root.service.playing ? "Playing on " : "Connected to ")
+                        + root.service.playbackDeviceName)
+                      : ""
+                    color: root.muted
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+                }
+              }
+
+              Equalizer {
+                id: nowPlayingEqualizer
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: nowPlayingHero.bottom
+                anchors.topMargin: Style.space(22)
+                anchors.bottom: parent.bottom
+                active: root.nowPlayingExpanded && window.visible
+                playing: root.service && root.service.playing
+                configPath: root.service && root.service.stateHome
+                  ? root.service.stateHome + "/omarchy-spotify/cava.conf" : ""
+                scriptPath: root.service && root.service.pluginDir
+                  ? root.service.pluginDir + "/scripts/equalizer.sh" : ""
+                mode: root.equalizerMode
+                onModeCycleRequested: root.cycleEqualizerMode()
+                barColor: root.accent
+                foreground: root.foreground
+                muted: root.muted
+                fontFamily: root.fontFamily
+              }
+            }
+          }
+        }
+
         PanelSeparator {
           id: footerSeparator
           visible: root.currentTab !== "login"
@@ -3809,7 +4011,10 @@ Item {
 
             Item {
               id: nowPlaying
-              width: Math.max(Style.space(170), Math.min(Style.space(240), playerRow.width * 0.29))
+              visible: !root.nowPlayingExpanded
+              width: visible
+                ? Math.max(Style.space(170), Math.min(Style.space(240), playerRow.width * 0.29))
+                : 0
               height: parent.height
               readonly property real metadataSpacing: Style.space(9)
 
@@ -3844,6 +4049,11 @@ Item {
                   font.pixelSize: Style.font.iconLarge
                 }
 
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleNowPlayingExpanded()
+                }
               }
 
               Column {
@@ -4119,6 +4329,19 @@ Item {
                     if (on) root.setPanelCursor("footer", "lyrics")
                   }
                   KeyHint { region: "footer"; action: "lyrics"; sequences: ["Ctrl+Shift+L"] }
+                }
+                Button {
+                  iconText: root.nowPlayingExpanded ? "󰊔" : "󰊓"
+                  foreground: root.foreground
+                  selected: root.nowPlayingExpanded
+                  hasCursor: root.cursorOn("footer", "expand")
+                  tooltipText: root.shortcutHint(root.nowPlayingExpanded
+                    ? "Back to browsing" : "Now playing view", "E")
+                  onClicked: root.toggleNowPlayingExpanded()
+                  onHovered: function(on) {
+                    if (on) root.setPanelCursor("footer", "expand")
+                  }
+                  KeyHint { region: "footer"; action: "expand"; sequences: ["E"] }
                 }
               }
 

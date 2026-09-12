@@ -21,8 +21,11 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "quickshell.spotify"
+  // Omarchy 4.0.3 strips __sourceDir from third-party manifests, so fall
+  // back to this file's own directory (local fix; see git diff).
   readonly property string pluginDir: manifest && manifest.__sourceDir
-    ? String(manifest.__sourceDir) : ""
+    ? String(manifest.__sourceDir)
+    : String(Qt.resolvedUrl(".")).replace(/^file:\/\//, "").replace(/\/$/, "")
   readonly property string homeDirectory: Quickshell.env("HOME") || ""
   readonly property string stateHome: {
     var explicit = String(Quickshell.env("XDG_STATE_HOME") || "").trim()
@@ -582,7 +585,10 @@ Item {
   }
 
   function configuredEntry() {
-    var config = shell && shell.shellConfig ? shell.shellConfig : null
+    // Omarchy 4.0.3 hands plugins barConfig rather than the whole
+    // shellConfig; without this fallback every restart reverts to defaults.
+    var config = shell && shell.shellConfig ? shell.shellConfig
+      : (shell && shell.barConfig ? ({ bar: shell.barConfig }) : null)
     if (!config) return null
     var layout = config.bar && config.bar.layout ? config.bar.layout : null
     var sections = ["left", "center", "right"]
@@ -3572,6 +3578,7 @@ Item {
     target: root.shell
     ignoreUnknownSignals: true
     function onShellConfigChanged() { root.syncSettings() }
+    function onBarConfigChanged() { root.syncSettings() }
   }
 
   Connections {

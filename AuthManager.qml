@@ -98,6 +98,10 @@ Item {
     startSecretLookup()
   }
 
+  // Local fix: v1.0.3 never calls restoreSession, so sessionChecked stays
+  // false and the login button is blocked. Upstream main restores on load.
+  Component.onCompleted: restoreSession()
+
   function restoreSession() {
     sessionChecked = false
     if (secretLookup.running || refreshBusy) return
