@@ -22,11 +22,11 @@ Item {
 
   readonly property string pluginId: manifest && manifest.id
     ? String(manifest.id) : "io.github.jeremylanger.omaspotify"
-  // The host strips __sourceDir from third-party manifests, so it is only ever
-  // populated for first-party plugins. The sanitization is intentional on
-  // Omarchy's side. Fall back to this file's own directory, which every host
-  // resolves identically and no host can withhold, then to the standard
-  // plugin install location.
+  // Third-party public manifests omit __sourceDir in newer Omarchy versions;
+  // the sanitization is intentional on Omarchy's side. Fall back to this
+  // file's own directory, which every host resolves identically and no host
+  // can withhold, then to the standard plugin install location.
+  readonly property string homeDirectory: Quickshell.env("HOME") || ""
   readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME")
     || (homeDirectory ? homeDirectory + "/.config" : ".config")
   readonly property string pluginDir: manifest && manifest.__sourceDir

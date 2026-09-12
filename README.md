@@ -158,9 +158,19 @@ omarchy shell -q io.github.jeremylanger.omaspotify.player volumeDown
 Each step is 5%, the same as Ctrl+Up / Ctrl+Down. This changes Spotify's own
 volume, including speakers, not the computer's output level.
 
-Click the Spotify icon on the left side of the bar. The mini-player asks you
-to **Set up and continue**, then Spotify sign-in finishes in your browser. You
-can move the widget later with Omarchy's bar controls.
+### Connect your Spotify account
+
+1. Click the Spotify icon in your bar (on the left by default; your layout may
+   place it elsewhere).
+2. Click **Set up and continue**, or **Continue with Spotify** if playback is
+   already installed.
+3. Sign in on Spotify's own page in your browser and approve access.
+4. To listen on this computer, complete the separate playback authorization
+   in your browser. If prompted, choose **Finish playback setup**.
+
+You need a Spotify Premium account. You do not need to create a Spotify
+Developer app or enter a client ID, client secret, or password in OmaSpotify.
+Account access and playback on this computer use separate authorizations.
 
 Local playback installs an exact-version backend only after its GitHub build
 provenance matches this plugin version's tag and the checkout's backend inputs
@@ -186,6 +196,29 @@ with a separate quota. This does not provide unlimited requests or restore restr
 Development apps require an eligible Premium owner and allowlisted users, and
 have endpoint restrictions. See Spotify's [quota modes](https://developer.spotify.com/documentation/web-api/concepts/quota-modes).
 The local Connect authorization remains separate.
+
+### If playback setup fails
+
+If the verified backend release is unavailable, the fallback build needs
+Rust and Cargo. They are not installed by the plugin. On Omarchy, install
+Rustup (which supplies Rust and Cargo), then rerun setup from the plugin
+directory so Rustup uses the version in `rust-toolchain.toml`:
+
+```bash
+omarchy pkg add rustup
+cd "$HOME/.config/omarchy/plugins/io.github.jeremylanger.omaspotify"
+./scripts/setup.sh
+```
+
+If you already have a working Rustup installation, skip the first command.
+The first build downloads the toolchain and dependencies and may take several
+minutes. After it succeeds, restart the shell with `omarchy restart shell`,
+open OmaSpotify, and continue signing in.
+
+**Playback setup could not be completed** is a general setup error, not a
+Spotify password error. Running `./scripts/setup.sh` in a terminal shows the
+underlying error. Missing Rust/Cargo is one possible cause; see the
+[technical prerequisites](docs/TECHNICAL.md) for the other requirements.
 
 ## Remove it completely
 
