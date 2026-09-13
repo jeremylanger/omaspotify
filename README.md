@@ -108,7 +108,7 @@ and a live equalizer drawn in your theme's colours. `V` switches between bars,
 pixels, scope and matrix. The equalizer listens only to OmaSpotify's own audio
 and needs `cava` (`sudo pacman -S cava`).
 
-![The Now playing screen with album artwork above a live equalizer](docs/screenshots/now-playing-bars.png)
+![The Now playing screen with album artwork above a live equalizer](docs/screenshots/now-playing.png)
 
 ### Everything you were just listening to
 

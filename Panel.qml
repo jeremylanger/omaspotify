@@ -21,6 +21,7 @@ Item {
   property bool openedForLogin: false
   property bool nowPlayingExpanded: false
   property string equalizerMode: "bars"
+  readonly property var equalizerModes: ["bars", "pixels", "scope", "matrix"]
 
   property double searchClock: Date.now()
   readonly property int searchCooldownSeconds: service
@@ -489,8 +490,7 @@ Item {
       state.selectedPlaylistItemCount)
     restoredDetailItemCount = Api.normalizedPlaylistRestoreCount(
       state.detailItemCount)
-    equalizerMode = ["bars", "pixels", "scope", "matrix"]
-      .indexOf(String(state.equalizerMode || "")) >= 0
+    equalizerMode = equalizerModes.indexOf(String(state.equalizerMode || "")) >= 0
       ? String(state.equalizerMode) : "bars"
     var restoredTab = String(state.tab || "home")
     if (["home", "discover", "search", "library", "playlists", "detail", "queue",
@@ -609,9 +609,8 @@ Item {
   }
 
   function cycleEqualizerMode() {
-    var modes = ["bars", "pixels", "scope", "matrix"]
-    var index = modes.indexOf(equalizerMode)
-    equalizerMode = modes[(index + 1) % modes.length]
+    var index = equalizerModes.indexOf(equalizerMode)
+    equalizerMode = equalizerModes[(index + 1) % equalizerModes.length]
     persistUiState()
   }
 
@@ -622,6 +621,7 @@ Item {
   }
 
   function goBack() {
+    nowPlayingExpanded = false
     if (!navigationStack.length) {
       chooseTab("home")
       return
@@ -1914,6 +1914,8 @@ Item {
     } else if (["home", "discover", "search", "library", "playlists", "queue",
       "stats", "devices", "setup"].indexOf(requestedTab) >= 0)
       currentTab = requestedTab
+    // Now playing covers the current page instead of replacing it.
+    if (requestedTab) nowPlayingExpanded = requestedTab === "nowplaying"
     if (accountConnected) {
       openedForLogin = false
     } else if (!sessionPending) {
@@ -2725,7 +2727,7 @@ Item {
 
         Row {
           id: workspace
-          visible: !root.nowPlayingExpanded
+          visible: !nowPlayingView.visible
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
@@ -3475,153 +3477,16 @@ Item {
           }
         }
 
-        Item {
+        NowPlayingPage {
           id: nowPlayingView
+          panel: root
           visible: root.nowPlayingExpanded && root.currentTab !== "login"
+          active: visible && window.visible
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: footerSeparator.top
           anchors.bottomMargin: Style.space(10)
-
-          BorderSurface {
-            anchors.fill: parent
-            radius: Style.cornerRadius
-            color: Style.normalFillFor(root.foreground, root.accent)
-            borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-            Item {
-              id: nowPlayingStage
-              anchors.fill: parent
-              anchors.margins: Style.space(22)
-              readonly property real artSize: Math.max(Style.space(120),
-                Math.min(height * 0.5, width * 0.34, Style.space(320)))
-
-              Row {
-                id: nowPlayingHero
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                height: nowPlayingStage.artSize
-                spacing: Style.space(24)
-
-                BorderSurface {
-                  id: nowPlayingHeroArt
-                  width: nowPlayingStage.artSize
-                  height: width
-                  radius: Style.cornerRadius
-                  color: Style.selectedFillFor(root.foreground, root.accent)
-                  borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
-
-                  RetryImage {
-                    id: nowPlayingHeroImage
-                    anchors.fill: parent
-                    anchors.margins: Style.space(2)
-                    requestedSource: root.service && root.service.artworkEnabled
-                      ? root.service.artworkFor(root.service.artUrl) : ""
-                    sourceSize.width: 640
-                    sourceSize.height: 640
-                    fillMode: Image.PreserveAspectFit
-                    asynchronous: true
-                    cache: true
-                    visible: status === Image.Ready
-                  }
-
-                  Text {
-                    anchors.centerIn: parent
-                    visible: nowPlayingHeroImage.status !== Image.Ready
-                    text: "󰎈"
-                    color: root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.displayLarge
-                  }
-                }
-
-                Column {
-                  width: Math.max(80, parent.width - nowPlayingHeroArt.width - parent.spacing)
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(6)
-
-                  Text {
-                    width: parent.width
-                    text: root.service && root.service.title
-                      ? root.service.title : "Nothing playing"
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.displayLarge
-                    font.bold: true
-                    wrapMode: Text.WordWrap
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
-                  }
-
-                  ArtistLinks {
-                    width: parent.width
-                    artists: root.service ? root.service.currentArtists : []
-                    fallbackText: root.service && root.service.artist
-                      ? root.service.artist : "Choose something to play"
-                    fallbackClickable: root.service && root.service.artist !== ""
-                      && root.service.currentArtistContextAvailable
-                      && artists.length === 0
-                    color: root.service && root.service.artist
-                      && root.service.currentArtistContextAvailable ? root.accent
-                      : root.muted
-                    accent: root.accent
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.title
-                    maximumLineCount: 1
-                    elide: Text.ElideRight
-                    onArtistRequested: function(item) { root.openItem(item) }
-                    onFallbackRequested: root.openCurrentArtist()
-                  }
-
-                  Text {
-                    width: parent.width
-                    visible: root.service && root.service.album !== ""
-                    text: root.service ? root.service.album : ""
-                    color: root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.subtitle
-                    elide: Text.ElideRight
-                  }
-
-                  Text {
-                    width: parent.width
-                    visible: root.service && root.service.playbackDeviceName !== ""
-                    text: root.service
-                      ? ((root.service.playing ? "Playing on " : "Connected to ")
-                        + root.service.playbackDeviceName)
-                      : ""
-                    color: root.muted
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    elide: Text.ElideRight
-                  }
-                }
-              }
-
-              Equalizer {
-                id: nowPlayingEqualizer
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: nowPlayingHero.bottom
-                anchors.topMargin: Style.space(22)
-                anchors.bottom: parent.bottom
-                active: root.nowPlayingExpanded && window.visible
-                playing: root.service && root.service.playing
-                configPath: root.service && root.service.stateDir
-                  ? root.service.stateDir + "/cava.conf" : ""
-                scriptPath: root.service && root.service.pluginDir
-                  ? root.service.pluginDir + "/scripts/equalizer.sh" : ""
-                mode: root.equalizerMode
-                onModeCycleRequested: root.cycleEqualizerMode()
-                barColor: root.accent
-                foreground: root.foreground
-                muted: root.muted
-                fontFamily: root.fontFamily
-              }
-            }
-          }
         }
 
         PanelSeparator {

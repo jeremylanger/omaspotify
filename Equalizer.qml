@@ -33,15 +33,12 @@ Item {
   property real barGap: Style.space(4)
 
   property var levels: []
-  property bool streamIdle: true
+  // Set only once the helper says nothing plays here, so the note about
+  // another device does not flash while cava is still starting.
+  property bool streamIdle: false
   property bool unavailable: false
   property string unavailableReason: ""
 
-  readonly property var modes: ["bars", "pixels", "scope", "matrix"]
-  readonly property var modeLabels: ({
-    bars: "Bars", pixels: "Pixels", scope: "Scope", matrix: "Matrix"
-  })
-  readonly property string modeLabel: modeLabels[mode] || mode
   readonly property real barWidth: Math.max(2,
     (width - barGap * (barCount - 1)) / barCount)
   readonly property real minBarHeight: Math.max(2, Style.space(3))
@@ -65,16 +62,9 @@ Item {
   function stop() {
     if (helper.running) helper.running = false
     levels = []
-    streamIdle = true
+    streamIdle = false
     // Try again next time the view opens, so installing cava needs no restart.
     unavailable = false
-  }
-
-  function cycleMode() {
-    var index = modes.indexOf(mode)
-    var next = modes[(index + 1) % modes.length]
-    modeCycleRequested()
-    if (mode === modes[index]) mode = next
   }
 
   function handleLine(line) {
@@ -120,7 +110,7 @@ Item {
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
       root.levels = []
-      root.streamIdle = true
+      root.streamIdle = false
       // A stop requested by the view arrives here after active already
       // flipped, so only a failure while still active is worth reporting.
       if (!root.active) return
@@ -142,7 +132,7 @@ Item {
     anchors.fill: parent
     enabled: !root.unavailable
     cursorShape: Qt.PointingHandCursor
-    onClicked: root.cycleMode()
+    onClicked: root.modeCycleRequested()
   }
 
   Rectangle {
@@ -439,7 +429,7 @@ Item {
     Text {
       id: badgeText
       anchors.centerIn: parent
-      text: root.modeLabel.toUpperCase() + " · V"
+      text: root.mode.toUpperCase() + " · V"
       color: root.barColor
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
