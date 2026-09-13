@@ -5007,6 +5007,7 @@ Item {
   AuthManager {
     id: catalogAuthManager
     pluginDir: root.pluginDir
+    restoreOnStart: true
   }
 
   AuthManager {
