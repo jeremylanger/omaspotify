@@ -297,6 +297,7 @@ Item {
     path: lyrics.omasingManifestPath
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: lyrics.omasingManifestPresent = true
     onLoadFailed: lyrics.omasingManifestPresent = false
   }
@@ -306,6 +307,7 @@ Item {
     path: lyrics.shellConfigPath
     watchChanges: true
     printErrors: false
+    onFileChanged: reload()
     onLoaded: lyrics.updateOmasingInBar(text())
     onLoadFailed: lyrics.updateOmasingInBar("")
   }
