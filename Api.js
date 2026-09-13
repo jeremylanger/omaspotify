@@ -403,6 +403,19 @@ function foregroundCooldownMs(nowMs, until, since, capMs) {
   return remaining > 0 ? Math.ceil(Math.min(wait, remaining)) : 0
 }
 
+// A personal client id gets its own quota, but Spotify stopped giving new apps
+// the catalog endpoints, so it answers 403 for related artists and a bogus
+// "Invalid limit" 400 for an artist's albums. The shipped id predates that
+// change and still reaches them, so what the personal one refuses is tried
+// once through it. 401 is a token to refresh, and 429 means slow down rather
+// than go spend the shared quota instead.
+function shouldFallBackToSharedClient(status, alreadyFellBack, hasFallback) {
+  if (hasFallback !== true || alreadyFellBack === true) return false
+  var code = Number(status) || 0
+  if (code === 401 || code === 429) return false
+  return code >= 400 && code < 500
+}
+
 function nextRateLimitedUntil(now, retryAfter, currentUntil, attempt) {
   var proposed = (Number(now) || 0) + rateLimitRetryMs(retryAfter, attempt)
   var existing = Number(currentUntil) || 0

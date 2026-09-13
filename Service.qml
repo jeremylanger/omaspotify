@@ -428,6 +428,11 @@ Item {
   property int savedUrisCheckingRevision: 0
   property int savedUrisBusyRevision: 0
   readonly property int savedUriCacheLimit: 4096
+  // A personal client id is in use, so the shipped one is worth keeping around
+  // for the endpoints Spotify will not let a new app reach.
+  readonly property bool usingPersonalClientId:
+    String(settings.clientId || "").trim() !== ""
+
   // Whether a song is liked barely changes, and when you change it here we
   // update it ourselves. Re-asking every five minutes bought nothing.
   readonly property int savedUriFreshnessMs: 1800000
@@ -4995,6 +5000,15 @@ Item {
     customClientId: settings.clientId
   }
 
+  // Pinned to the shipped client id, which predates Spotify closing the catalog
+  // endpoints to new apps and so still reaches them. Only used for what a
+  // personal client id is refused, and only when one is configured: without
+  // that, authManager is already this identity.
+  AuthManager {
+    id: catalogAuthManager
+    pluginDir: root.pluginDir
+  }
+
   AuthManager {
     id: connectAuthManager
     pluginDir: root.pluginDir
@@ -5006,6 +5020,10 @@ Item {
   SpotifyApi {
     id: spotifyApi
     auth: authManager
+    // Only when it actually has a session of its own. Otherwise the retry
+    // would fail with "Not logged in" and hide the refusal that caused it.
+    fallbackAuth: root.usingPersonalClientId && catalogAuthManager.loggedIn
+      ? catalogAuthManager : null
   }
 
   SpotifyConnectManager {

@@ -15,6 +15,10 @@ Item {
   height: 0
 
   required property var auth
+  // The shipped client id, kept only for what a personal one is refused. Null
+  // when there is no personal id, in which case `auth` is already the shipped
+  // one and there is nothing to fall back to.
+  property var fallbackAuth: null
 
   property var searchRequest: null
   property int searchSerial: 0
@@ -269,7 +273,8 @@ Item {
     }
     url = Api.appendQuery(url, job.query)
 
-    auth.withAccessToken(function(token, tokenError) {
+    var identity = job.fellBack === true && fallbackAuth ? fallbackAuth : auth
+    identity.withAccessToken(function(token, tokenError) {
       job.authedAt = now()
       if (handle.aborted) {
         releaseRequestSlot(handle)
@@ -291,7 +296,7 @@ Item {
           if (handle.aborted || job.finished === true) return
           var payload = Api.parseJson(xhr.responseText, null)
           if (xhr.status === 401 && job.retried !== true) {
-            auth.invalidateAccessToken()
+            identity.invalidateAccessToken()
             job.activeDeadlineAt = 0
             job.retried = true
             requestQueue = Api.enqueueApiJob(requestQueue, job)
@@ -325,6 +330,16 @@ Item {
             }
           } else {
             restrictInFlight = false
+          }
+          // Refused by the personal client: try the shipped one, which still
+          // reaches the catalog endpoints Spotify closed to new apps.
+          if (Api.shouldFallBackToSharedClient(xhr.status, job.fellBack,
+              !!fallbackAuth)) {
+            job.fellBack = true
+            job.activeDeadlineAt = 0
+            requestQueue = Api.enqueueApiJob(requestQueue, job)
+            releaseRequestSlot(handle)
+            return
           }
           var ok = xhr.status >= 200 && xhr.status < 300
           var error = ok ? "" : root.requestError(xhr.status, payload, xhr,
@@ -367,6 +382,7 @@ Item {
       body: body,
       callback: callback,
       retried: false,
+      fellBack: false,
       rateLimitRetries: 0,
       retryRateLimit: settings.retryRateLimit !== false,
       priority: String(settings.priority || ""),

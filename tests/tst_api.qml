@@ -422,6 +422,27 @@ TestCase {
     verify(!Api.jobMayRunDuringCooldown(null, false))
   }
 
+  // A personal client id has its own quota but loses the catalog endpoints a
+  // grandfathered app still reaches, so what it refuses is tried once through
+  // the shared one.
+  function test_sharedClientFallback_onlyForRefusalsItCanAnswer() {
+    verify(Api.shouldFallBackToSharedClient(403, false, true), "forbidden")
+    verify(Api.shouldFallBackToSharedClient(400, false, true),
+      "catalog refusals arrive as a bogus parameter error")
+    verify(Api.shouldFallBackToSharedClient(404, false, true))
+
+    verify(!Api.shouldFallBackToSharedClient(401, false, true),
+      "a token to refresh, not a permission problem")
+    verify(!Api.shouldFallBackToSharedClient(429, false, true),
+      "slow down rather than spend someone else's quota")
+    verify(!Api.shouldFallBackToSharedClient(200, false, true))
+    verify(!Api.shouldFallBackToSharedClient(500, false, true))
+
+    verify(!Api.shouldFallBackToSharedClient(403, true, true), "only once")
+    verify(!Api.shouldFallBackToSharedClient(403, false, false),
+      "nothing to fall back to")
+  }
+
   // A refusal aimed at the library crawl must not freeze the page someone just
   // opened. Only their own request being refused holds them back.
   function test_apiCooldown_keepsBackgroundRefusalsOffTheOpenPage() {
