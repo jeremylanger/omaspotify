@@ -426,21 +426,47 @@ TestCase {
   // grandfathered app still reaches, so what it refuses is tried once through
   // the shared one.
   function test_sharedClientFallback_onlyForRefusalsItCanAnswer() {
-    verify(Api.shouldFallBackToSharedClient(403, false, true), "forbidden")
-    verify(Api.shouldFallBackToSharedClient(400, false, true),
+    var catalog = "/artists/abc/related-artists"
+    verify(Api.shouldFallBackToSharedClient(403, false, true, "GET", catalog))
+    verify(Api.shouldFallBackToSharedClient(400, false, true, "GET", catalog),
       "catalog refusals arrive as a bogus parameter error")
-    verify(Api.shouldFallBackToSharedClient(404, false, true))
+    verify(Api.shouldFallBackToSharedClient(404, false, true, "GET", catalog))
 
-    verify(!Api.shouldFallBackToSharedClient(401, false, true),
+    verify(!Api.shouldFallBackToSharedClient(401, false, true, "GET", catalog),
       "a token to refresh, not a permission problem")
-    verify(!Api.shouldFallBackToSharedClient(429, false, true),
+    verify(!Api.shouldFallBackToSharedClient(429, false, true, "GET", catalog),
       "slow down rather than spend someone else's quota")
-    verify(!Api.shouldFallBackToSharedClient(200, false, true))
-    verify(!Api.shouldFallBackToSharedClient(500, false, true))
+    verify(!Api.shouldFallBackToSharedClient(200, false, true, "GET", catalog))
+    verify(!Api.shouldFallBackToSharedClient(500, false, true, "GET", catalog))
 
-    verify(!Api.shouldFallBackToSharedClient(403, true, true), "only once")
-    verify(!Api.shouldFallBackToSharedClient(403, false, false),
+    verify(!Api.shouldFallBackToSharedClient(403, true, true, "GET", catalog),
+      "only once")
+    verify(!Api.shouldFallBackToSharedClient(403, false, false, "GET", catalog),
       "nothing to fall back to")
+  }
+
+  // The shared quota is the thing we are trying to stop spending, so only the
+  // requests a personal client genuinely cannot answer are sent to it.
+  function test_sharedClientFallback_staysOffAnythingItCannotHelpWith() {
+    verify(!Api.shouldFallBackToSharedClient(404, false, true, "PUT",
+      "/me/player/play"), "never repeat something that changes state")
+    verify(!Api.shouldFallBackToSharedClient(403, false, true, "POST",
+      "/playlists/abc/tracks"))
+    verify(!Api.shouldFallBackToSharedClient(400, false, true, "DELETE",
+      "/playlists/abc/tracks"))
+
+    verify(!Api.shouldFallBackToSharedClient(403, false, true, "GET",
+      "/me/tracks"), "your own library reads fine on your own client")
+    verify(!Api.shouldFallBackToSharedClient(404, false, true, "GET",
+      "https://api.spotify.com/v1/me/albums?offset=50"),
+      "including when it arrives as a paging cursor")
+
+    verify(Api.shouldFallBackToSharedClient(403, false, true, "GET",
+      "https://api.spotify.com/v1/artists/abc/albums"),
+      "a catalog cursor still falls back")
+    verify(Api.shouldFallBackToSharedClient(400, false, true, "GET", "/tracks"))
+    verify(Api.shouldFallBackToSharedClient(403, false, true, "GET",
+      "/browse/new-releases"))
   }
 
   // A refusal aimed at the library crawl must not freeze the page someone just

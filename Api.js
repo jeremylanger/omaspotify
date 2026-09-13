@@ -409,11 +409,23 @@ function foregroundCooldownMs(nowMs, until, since, capMs) {
 // change and still reaches them, so what the personal one refuses is tried
 // once through it. 401 is a token to refresh, and 429 means slow down rather
 // than go spend the shared quota instead.
-function shouldFallBackToSharedClient(status, alreadyFellBack, hasFallback) {
+function shouldFallBackToSharedClient(status, alreadyFellBack, hasFallback,
+    method, path) {
   if (hasFallback !== true || alreadyFellBack === true) return false
+  // Never repeat something that changes state, and never send your own library
+  // to the shared quota: a personal client reads /me perfectly well, so a
+  // refusal there is a real error rather than a closed endpoint.
+  if (String(method || "GET").toUpperCase() !== "GET") return false
+  if (apiRequestPath(path).indexOf("/me") === 0) return false
   var code = Number(status) || 0
   if (code === 401 || code === 429) return false
   return code >= 400 && code < 500
+}
+
+// Paging cursors come back as absolute urls, so compare the path either way.
+function apiRequestPath(path) {
+  var value = String(path || "")
+  return value.indexOf(API_BASE) === 0 ? value.slice(API_BASE.length) : value
 }
 
 function nextRateLimitedUntil(now, retryAfter, currentUntil, attempt) {

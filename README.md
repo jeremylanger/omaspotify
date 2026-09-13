@@ -206,12 +206,14 @@ quietly asks the shipped one for just those. If you have never signed in with
 the shipped app, those parts of the artist page and the Home tab stay empty
 instead.
 
-This is a power-user option, not a recommendation for everyone. Spotify
-[now limits](https://developer.spotify.com/blog/2026-02-06-update-on-developer-access-and-platform-security)
-a development-mode app to **one client ID per developer and five authorized
-users**, so it cannot be handed out to the people who install your fork. It also
-requires a Premium account. See Spotify's
-[quota modes](https://developer.spotify.com/documentation/web-api/concepts/quota-modes).
+This is a power-user option, not a recommendation for everyone. A
+development-mode app allows [five authorized users](https://developer.spotify.com/documentation/web-api/concepts/quota-modes),
+so it cannot be handed out to the people who install your fork, and it requires
+a Premium account. Since
+[July 2026](https://developer.spotify.com/blog/2026-07-23-web-api-quota-updates)
+a developer account may hold up to 25 client IDs, but the quota is counted per
+developer account rather than per ID, so making more of them does not buy more
+requests.
 The local Connect authorization remains separate.
 
 ### If playback setup fails

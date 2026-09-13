@@ -334,7 +334,7 @@ Item {
           // Refused by the personal client: try the shipped one, which still
           // reaches the catalog endpoints Spotify closed to new apps.
           if (Api.shouldFallBackToSharedClient(xhr.status, job.fellBack,
-              !!fallbackAuth)) {
+              !!fallbackAuth, job.method, job.path)) {
             job.fellBack = true
             job.activeDeadlineAt = 0
             requestQueue = Api.enqueueApiJob(requestQueue, job)
