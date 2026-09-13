@@ -19,6 +19,9 @@ Item {
   property double lastVolumeAdjustAt: 0
   property string currentTab: "home"
   property bool openedForLogin: false
+  property bool nowPlayingExpanded: false
+  property string equalizerMode: "bars"
+  readonly property var equalizerModes: ["bars", "pixels", "scope", "matrix"]
 
   property double searchClock: Date.now()
   readonly property int searchCooldownSeconds: service
@@ -487,9 +490,11 @@ Item {
       state.selectedPlaylistItemCount)
     restoredDetailItemCount = Api.normalizedPlaylistRestoreCount(
       state.detailItemCount)
+    equalizerMode = equalizerModes.indexOf(String(state.equalizerMode || "")) >= 0
+      ? String(state.equalizerMode) : "bars"
     var restoredTab = String(state.tab || "home")
     if (["home", "discover", "search", "library", "playlists", "detail", "queue",
-      "nowplaying", "stats", "devices", "setup"]
+      "stats", "devices", "setup"]
         .indexOf(restoredTab) >= 0) currentTab = restoredTab
     if (restoreDetail !== false && currentTab === "detail" && state.detailItem) {
       var sameDetail = service.detailItem
@@ -532,7 +537,8 @@ Item {
       selectedPlaylist: selected,
       selectedPlaylistId: selected ? selected.id : restoredPlaylistId,
       selectedPlaylistItemCount: selectedItemCount,
-      lastRadioPlaylist: service.lastRadioPlaylist
+      lastRadioPlaylist: service.lastRadioPlaylist,
+      equalizerMode: equalizerMode
     })
   }
 
@@ -551,6 +557,7 @@ Item {
   }
 
   function openItem(item) {
+    nowPlayingExpanded = false
     if (!item) return
     if (item.type === "artist" && !item.id) {
       if (service) service.resolveArtist(item.name, function(resolved) {
@@ -595,7 +602,26 @@ Item {
     service.currentContext("album", function(item) { openItem(item) })
   }
 
+  function toggleNowPlayingExpanded() {
+    if (currentTab === "login") return
+    nowPlayingExpanded = !nowPlayingExpanded
+    if (nowPlayingExpanded) setPanelCursor("footer", "play")
+  }
+
+  function cycleEqualizerMode() {
+    var index = equalizerModes.indexOf(equalizerMode)
+    equalizerMode = equalizerModes[(index + 1) % equalizerModes.length]
+    persistUiState()
+  }
+
+  function collapseNowPlaying() {
+    if (!nowPlayingExpanded) return false
+    nowPlayingExpanded = false
+    return true
+  }
+
   function goBack() {
+    nowPlayingExpanded = false
     if (!navigationStack.length) {
       chooseTab("home")
       return
@@ -975,15 +1001,18 @@ Item {
   function footerCursorActions() {
     if (currentTab === "login") return []
     var actions = []
-    if (service && service.currentTrackSaveAvailable) actions.push("like")
-    if (service && service.currentTrackItem) actions.push("context")
-    if (service && service.currentArtistContextAvailable) actions.push("artist")
-    if (service && service.currentAlbumContextAvailable) actions.push("album")
+    if (!nowPlayingExpanded) {
+      if (service && service.currentTrackSaveAvailable) actions.push("like")
+      if (service && service.currentTrackItem) actions.push("context")
+      if (service && service.currentArtistContextAvailable) actions.push("artist")
+      if (service && service.currentAlbumContextAvailable) actions.push("album")
+    }
     if (service && service.playbackControllable)
       actions.push("shuffle", spokenWordPlaying ? "back15" : "previous", "play",
         spokenWordPlaying ? "forward30" : "next", "repeat")
     else if (service && service.playbackStartable) actions.push("play")
     if (service && service.lyricsAvailable) actions.push("lyrics")
+    actions.push("expand")
     if (service && service.lengthSeconds > 0 && service.playbackControllable)
       actions.push("seek")
     actions.push("devices", "sleep")
@@ -1037,6 +1066,8 @@ Item {
   }
 
   function panelCursorRegions() {
+    // Only the player is on screen while Now playing fills the window.
+    if (nowPlayingExpanded) return ["footer"]
     var regions = []
     if (sidebarCursorActions().length) regions.push("sidebar")
     regions.push("header")
@@ -1215,7 +1246,7 @@ Item {
     else if (action === "nav-discover") chooseTab("discover")
     else if (action === "nav-radio") openLastRadio()
     else if (action === "nav-queue") chooseTab("queue")
-    else if (action === "nav-nowplaying") chooseTab("nowplaying")
+    else if (action === "nav-nowplaying") toggleNowPlayingExpanded()
     else if (action === "nav-stats") chooseTab("stats")
     else if (action === "nav-library") chooseTab("library")
     else if (action === "nav-playlists") chooseTab("playlists")
@@ -1251,6 +1282,7 @@ Item {
     else if (action === "next" && service) service.next()
     else if (action === "repeat" && service) service.cycleRepeat()
     else if (action === "lyrics") openLyrics()
+    else if (action === "expand") toggleNowPlayingExpanded()
     else if (action === "devices") chooseTab("devices")
     else if (action === "sleep") sleepPopup.open()
     else if (action === "volume") toggleMute()
@@ -1620,7 +1652,8 @@ Item {
       { action: "Open Settings", keys: "Ctrl+," },
       { action: "Open For You", keys: "Alt+Shift+H" },
       { action: "Open Queue", keys: "Alt+Shift+Q" },
-      { action: "Open Now playing", keys: "Alt+Shift+N" },
+      { action: "Open or close Now playing", keys: "E or Alt+Shift+N" },
+      { action: "Change the equalizer style in Now playing", keys: "V" },
       { action: "Open Your listening", keys: "Alt+Shift+I" },
       { action: "Open Devices", keys: "Alt+Shift+D" },
       { action: "Open the current artist", keys: "Ctrl+Shift+A" },
@@ -1879,8 +1912,10 @@ Item {
       artistSearchText = ""
       detailFilter = ""
     } else if (["home", "discover", "search", "library", "playlists", "queue",
-      "nowplaying", "stats", "devices", "setup"].indexOf(requestedTab) >= 0)
+      "stats", "devices", "setup"].indexOf(requestedTab) >= 0)
       currentTab = requestedTab
+    // Now playing covers the current page instead of replacing it.
+    if (requestedTab) nowPlayingExpanded = requestedTab === "nowplaying"
     if (accountConnected) {
       openedForLogin = false
     } else if (!sessionPending) {
@@ -1944,6 +1979,7 @@ Item {
   }
 
   function chooseTab(tab) {
+    nowPlayingExpanded = false
     if (!accountConnected) {
       currentTab = "login"
       openedForLogin = true
@@ -2069,7 +2105,6 @@ Item {
     if (currentTab === "library") return libraryPage
     if (currentTab === "playlists") return playlistsPage
     if (currentTab === "detail") return detailPage
-    if (currentTab === "nowplaying") return nowPlayingPage
     if (currentTab === "stats") return statsPage
     if (currentTab === "queue") return queuePage
     if (currentTab === "devices") return devicesPage
@@ -2083,7 +2118,6 @@ Item {
     if (currentTab === "discover") return "Discover"
     if (currentTab === "library") return "Your Library"
     if (currentTab === "playlists") return "Playlists"
-    if (currentTab === "nowplaying") return "Now playing"
     if (currentTab === "stats") return "Your listening"
     if (currentTab === "queue") return "Queue"
     if (currentTab === "devices") return "Spotify Connect"
@@ -2415,6 +2449,11 @@ Item {
           event.accepted = true
           return
         }
+        if (root.collapseNowPlaying()) {
+          root.disarmEscapeClose()
+          event.accepted = true
+          return
+        }
         if (root.dismissSearch()) {
           event.accepted = true
           return
@@ -2519,7 +2558,7 @@ Item {
         enabled: root.accountConnected && !root.shortcutsBlocked
         onActivated: {
           root.latchShortcutMode(sequence)
-          root.chooseTab("nowplaying")
+          root.toggleNowPlayingExpanded()
         }
       }
       Shortcut {
@@ -2591,6 +2630,24 @@ Item {
         onActivated: {
           root.latchShortcutMode(sequence)
           root.toggleMute()
+        }
+      }
+      Shortcut {
+        sequence: "V"
+        enabled: !root.shortcutsBlocked && !root.textInputFocused()
+          && root.nowPlayingExpanded
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.cycleEqualizerMode()
+        }
+      }
+      Shortcut {
+        sequence: "E"
+        enabled: !root.shortcutsBlocked && !root.textInputFocused()
+          && root.currentTab !== "login"
+        onActivated: {
+          root.latchShortcutMode(sequence)
+          root.toggleNowPlayingExpanded()
         }
       }
       Shortcut {
@@ -2670,6 +2727,7 @@ Item {
 
         Row {
           id: workspace
+          visible: !nowPlayingView.visible
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.top: parent.top
@@ -2762,6 +2820,7 @@ Item {
                       root.primaryNavigationShortcut(modelData.id))
                   onClicked: {
                     if (radioEntry) root.openLastRadio()
+                    else if (modelData.id === "nowplaying") root.toggleNowPlayingExpanded()
                     else root.chooseTab(modelData.id)
                   }
                   onHovered: function(on) {
@@ -3307,7 +3366,6 @@ Item {
               id: unifiedSearchBar
               visible: root.currentTab !== "login" && root.currentTab !== "devices"
                 && root.currentTab !== "setup" && root.currentTab !== "stats"
-                && root.currentTab !== "nowplaying"
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: statusBanner.visible ? statusBanner.bottom : pageHeader.bottom
@@ -3419,6 +3477,18 @@ Item {
           }
         }
 
+        NowPlayingPage {
+          id: nowPlayingView
+          panel: root
+          visible: root.nowPlayingExpanded && root.currentTab !== "login"
+          active: visible && window.visible
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.bottom: footerSeparator.top
+          anchors.bottomMargin: Style.space(10)
+        }
+
         PanelSeparator {
           id: footerSeparator
           visible: root.currentTab !== "login"
@@ -3449,7 +3519,8 @@ Item {
 
             Item {
               id: nowPlaying
-              width: root.extraNarrowWidth
+              visible: !root.nowPlayingExpanded
+              width: !visible ? 0 : root.extraNarrowWidth
                 ? Math.max(Style.space(80), playerRow.width - transport.width
                   - playerRow.spacing)
                 : Math.max(Style.space(170), Math.min(Style.space(240),
@@ -3496,6 +3567,11 @@ Item {
                   font.pixelSize: Style.font.iconLarge
                 }
 
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleNowPlayingExpanded()
+                }
               }
 
               Column {
@@ -3814,6 +3890,19 @@ Item {
                   }
                   KeyHint { region: "footer"; action: "lyrics"; sequences: ["Ctrl+Shift+L"] }
                 }
+                TransportButton {
+                  glyphText: root.nowPlayingExpanded ? "󰊔" : "󰊓"
+                  foreground: root.foreground
+                  selected: root.nowPlayingExpanded
+                  hasCursor: root.cursorOn("footer", "expand")
+                  tooltipText: root.shortcutHint(root.nowPlayingExpanded
+                    ? "Back to browsing" : "Now playing view", "E")
+                  onClicked: root.toggleNowPlayingExpanded()
+                  onHovered: function(on) {
+                    if (on) root.setPanelCursor("footer", "expand")
+                  }
+                  KeyHint { region: "footer"; action: "expand"; sequences: ["E"] }
+                }
               }
 
               Row {
@@ -4077,14 +4166,6 @@ Item {
     id: statsPage
 
     StatsPage {
-      panel: root
-    }
-  }
-
-  Component {
-    id: nowPlayingPage
-
-    NowPlayingPage {
       panel: root
     }
   }

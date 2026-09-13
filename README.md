@@ -103,10 +103,12 @@ listen, and top artists and songs sit underneath it across three ranges.
 
 ### The song, full size
 
-`Alt+Shift+N` gives the current track the whole window—artwork, title, and the
-scrubber, nothing else.
+`E` or `Alt+Shift+N` gives the current track the whole window—artwork, title,
+and a live equalizer drawn in your theme's colours. `V` switches between bars,
+pixels, scope and matrix. The equalizer listens only to OmaSpotify's own audio
+and needs `cava` (`sudo pacman -S cava`).
 
-![The Now playing screen showing full-size album artwork](docs/screenshots/now-playing.png)
+![The Now playing screen with album artwork above a live equalizer](docs/screenshots/now-playing.png)
 
 ### Everything you were just listening to
 

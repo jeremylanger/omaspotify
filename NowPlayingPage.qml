@@ -2,187 +2,148 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-import "Api.js" as Api
-
-// A full view of what is playing: large artwork, the names around it, and
-// where you are in the track. Everything here is readable from across a room.
+// What is playing, full size: large artwork, the names around it, and a live
+// equalizer. The player bar below keeps playback controls, seek and volume.
 Item {
   id: page
 
   property var panel: null
+  // The equalizer runs only while this is true, so a closed view costs nothing.
+  property bool active: false
 
   readonly property var service: panel ? panel.service : null
-  readonly property var item: service ? service.currentTrackItem : null
-  readonly property bool hasTrack: !!(service && service.currentUri)
-  readonly property bool spokenWord: !!(service && service.currentIsSpokenWord)
-  // Artwork takes whatever the shorter side allows, so it never crowds the text.
-  readonly property int artSize: Math.max(Style.space(80),
-    Math.min(width - Style.space(40), height - Style.space(120)))
 
-  Column {
-    anchors.centerIn: parent
-    width: Math.min(parent.width, Math.max(page.artSize, Style.space(220)))
-    spacing: Style.space(10)
-    visible: page.hasTrack
+  BorderSurface {
+    anchors.fill: parent
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(page.panel.foreground, page.panel.accent)
+    borderSpec: Border.controlSpec("normal", page.panel.foreground, page.panel.accent)
 
-    BorderSurface {
-      id: artFrame
-      width: page.artSize
-      height: page.artSize
-      anchors.horizontalCenter: parent.horizontalCenter
-      radius: Style.cornerRadius
-      color: Style.normalFillFor(page.panel.foreground, page.panel.accent)
-      borderSpec: Border.controlSpec("normal", page.panel.foreground, page.panel.accent)
+    Item {
+      id: stage
+      anchors.fill: parent
+      anchors.margins: Style.space(22)
+      readonly property real artSize: Math.max(Style.space(120),
+        Math.min(height * 0.5, width * 0.34, Style.space(320)))
 
-      Image {
-        id: art
-        anchors.fill: parent
-        anchors.margins: Style.space(2)
-        source: page.service && page.service.artUrl
-          ? page.service.artworkFor(page.service.artUrl) : ""
-        sourceSize.width: 640
-        sourceSize.height: 640
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        visible: status === Image.Ready
-      }
+      Row {
+        id: hero
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: stage.artSize
+        spacing: Style.space(24)
 
-      Text {
-        anchors.centerIn: parent
-        visible: art.status !== Image.Ready
-        text: page.spokenWord ? "󰦔" : "󰝚"
-        color: page.panel.muted
-        font.family: page.panel.fontFamily
-        font.pixelSize: Style.font.displayLarge
-      }
-    }
+        BorderSurface {
+          id: heroArt
+          width: stage.artSize
+          height: width
+          radius: Style.cornerRadius
+          color: Style.selectedFillFor(page.panel.foreground, page.panel.accent)
+          borderSpec: Border.controlSpec("normal", page.panel.foreground, page.panel.accent)
 
-    Column {
-      width: parent.width
-      spacing: Style.space(2)
+          RetryImage {
+            id: heroImage
+            anchors.fill: parent
+            anchors.margins: Style.space(2)
+            requestedSource: page.service && page.service.artworkEnabled
+              ? page.service.artworkFor(page.service.artUrl) : ""
+            sourceSize.width: 640
+            sourceSize.height: 640
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            cache: true
+            visible: status === Image.Ready
+          }
 
-      Text {
-        width: parent.width
-        horizontalAlignment: Text.AlignHCenter
-        text: page.service ? page.service.title : ""
-        color: page.panel.foreground
-        font.family: page.panel.fontFamily
-        font.pixelSize: Style.font.heading
-        font.bold: true
-        elide: Text.ElideRight
-      }
-
-      Text {
-        width: parent.width
-        horizontalAlignment: Text.AlignHCenter
-        text: page.service ? page.service.artist : ""
-        color: page.panel.accent
-        font.family: page.panel.fontFamily
-        font.pixelSize: Style.font.subtitle
-        elide: Text.ElideRight
-
-        MouseArea {
-          anchors.fill: parent
-          cursorShape: Qt.PointingHandCursor
-          enabled: !!(page.item && page.item.artists && page.item.artists.length)
-          onClicked: page.panel.openItem(page.item.artists[0])
+          Text {
+            anchors.centerIn: parent
+            visible: heroImage.status !== Image.Ready
+            text: "󰎈"
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.displayLarge
+          }
         }
-      }
 
-      Text {
-        width: parent.width
-        horizontalAlignment: Text.AlignHCenter
-        text: page.service ? page.service.album : ""
-        color: page.panel.muted
-        font.family: page.panel.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        elide: Text.ElideRight
+        Column {
+          width: Math.max(80, parent.width - heroArt.width - parent.spacing)
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(6)
 
-        MouseArea {
-          anchors.fill: parent
-          cursorShape: Qt.PointingHandCursor
-          enabled: !!(page.item && page.item.albumItem)
-          onClicked: page.panel.openItem(page.item.albumItem)
-        }
-      }
-    }
+          Text {
+            width: parent.width
+            text: page.service && page.service.title
+              ? page.service.title : "Nothing playing"
+            color: page.panel.foreground
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.displayLarge
+            font.bold: true
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
+          }
 
-    Row {
-      width: parent.width
-      spacing: Style.space(5)
+          ArtistLinks {
+            width: parent.width
+            artists: page.service ? page.service.currentArtists : []
+            fallbackText: page.service && page.service.artist
+              ? page.service.artist : "Choose something to play"
+            fallbackClickable: page.service && page.service.artist !== ""
+              && page.service.currentArtistContextAvailable
+              && artists.length === 0
+            color: page.service && page.service.artist
+              && page.service.currentArtistContextAvailable ? page.panel.accent
+              : page.panel.muted
+            accent: page.panel.accent
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.title
+            maximumLineCount: 1
+            elide: Text.ElideRight
+            onArtistRequested: function(item) { page.panel.openItem(item) }
+            onFallbackRequested: page.panel.openCurrentArtist()
+          }
 
-      Text {
-        id: elapsed
-        anchors.verticalCenter: parent.verticalCenter
-        text: Api.millisecondsToClock(
-          (page.service ? page.service.positionSeconds : 0) * 1000)
-        color: page.panel.muted
-        font.family: page.panel.fontFamily
-        font.pixelSize: Style.font.bodySmall
-      }
+          Text {
+            width: parent.width
+            visible: page.service && page.service.album !== ""
+            text: page.service ? page.service.album : ""
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.subtitle
+            elide: Text.ElideRight
+          }
 
-      Item {
-        width: Math.max(40, parent.width - elapsed.width - total.width
-          - parent.spacing * 2)
-        height: Style.space(18)
-        anchors.verticalCenter: parent.verticalCenter
-
-        PlaybackSlider {
-          anchors.fill: parent
-          bar: page.panel.panelBar
-          minimum: 0
-          maximum: Math.max(1, page.service ? page.service.lengthSeconds : 1)
-          step: 5
-          sourceValue: page.service ? page.service.positionSeconds : 0
-          sourcePending: page.service && page.service.pendingRemoteSeek !== null
-          acknowledgeTolerance: 2
-          contextKey: page.service
-            ? page.service.currentUri + "|" + page.service.playbackDeviceName : ""
-          onCommitted: function(value) {
-            if (page.service) page.service.seekSeconds(value)
+          Text {
+            width: parent.width
+            visible: page.service && page.service.playbackDeviceName !== ""
+            text: page.service
+              ? ((page.service.playing ? "Playing on " : "Connected to ")
+                + page.service.playbackDeviceName)
+              : ""
+            color: page.panel.muted
+            font.family: page.panel.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
           }
         }
       }
 
-      Text {
-        id: total
-        anchors.verticalCenter: parent.verticalCenter
-        text: Api.millisecondsToClock(
-          (page.service ? page.service.lengthSeconds : 0) * 1000)
-        color: page.panel.muted
-        font.family: page.panel.fontFamily
-        font.pixelSize: Style.font.bodySmall
+      Equalizer {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: hero.bottom
+        anchors.topMargin: Style.space(22)
+        anchors.bottom: parent.bottom
+        active: page.active
+        playing: page.service && page.service.playing
+        configPath: page.service && page.service.stateDir
+          ? page.service.stateDir + "/cava.conf" : ""
+        scriptPath: page.service && page.service.pluginDir
+          ? page.service.pluginDir + "/scripts/equalizer.sh" : ""
+        mode: page.panel.equalizerMode
+        onModeCycleRequested: page.panel.cycleEqualizerMode()
       }
-    }
-  }
-
-  Column {
-    anchors.centerIn: parent
-    spacing: Style.space(6)
-    visible: !page.hasTrack
-
-    Text {
-      anchors.horizontalCenter: parent.horizontalCenter
-      text: "󰝚"
-      color: page.panel.muted
-      font.family: page.panel.fontFamily
-      font.pixelSize: Style.font.displayLarge
-    }
-
-    Text {
-      anchors.horizontalCenter: parent.horizontalCenter
-      text: "Nothing playing"
-      color: page.panel.foreground
-      font.family: page.panel.fontFamily
-      font.pixelSize: Style.font.title
-    }
-
-    Text {
-      anchors.horizontalCenter: parent.horizontalCenter
-      text: "Pick something from your library and it will show up here."
-      color: page.panel.muted
-      font.family: page.panel.fontFamily
-      font.pixelSize: Style.font.bodySmall
     }
   }
 }

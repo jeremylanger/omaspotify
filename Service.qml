@@ -1562,7 +1562,7 @@ Item {
   function normalizedView(view) {
     var value = String(view || "search")
     return ["home", "discover", "search", "library", "playlists", "detail",
-      "queue", "nowplaying", "stats", "devices", "setup"].indexOf(value) >= 0
+      "queue", "stats", "devices", "setup"].indexOf(value) >= 0
       ? value : "search"
   }
 

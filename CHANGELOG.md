@@ -6,6 +6,10 @@ OmaSpotify is a fork of [Omarchy Spotify](https://github.com/stappmus/Omarchy-Sp
 Changes below start from the fork point. For the history of the original plugin, see
 [its changelog](https://github.com/stappmus/Omarchy-Spotify/blob/main/CHANGELOG.md).
 
+- Now playing is a full-window view with a live equalizer in the theme's
+  colours, by Peter Sønderby ([#84](https://github.com/stappmus/Omarchy-Spotify/issues/84)).
+  Open it with `E`, `Alt+Shift+N`, the sidebar, or the player artwork, and
+  switch styles with `V`. The equalizer needs `cava`.
 - Removed dead code: the unused `ArtistSearchSection` component, the `patches/`
   directory, and a duplicate copy of a screenshot shipped as `preview.png`.
 - Shrank the documentation screenshots from 3200px to 1600px wide.
