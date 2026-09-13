@@ -2120,7 +2120,9 @@ TestCase {
     // Playing on this computer: MPRIS pushes every change, so the only reason
     // to ask at all is to notice a Connect device taking over.
     compare(Api.remotePlaybackPollInterval(true, false, true, true), 60000)
-    compare(Api.remotePlaybackPollInterval(true, false, true, false), 60000)
+    // But the engine merely running and idle is not MPRIS telling us anything,
+    // and someone may be about to start playing on their phone.
+    compare(Api.remotePlaybackPollInterval(true, false, true, false), 15000)
     // Nothing playing anywhere, panel open: slow enough to be cheap, quick
     // enough to notice a phone starting something.
     compare(Api.remotePlaybackPollInterval(true, false, false, false), 15000)

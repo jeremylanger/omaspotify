@@ -477,11 +477,8 @@ function remotePlaybackPollShouldRun(loggedIn, loading, uiVisible, useRemote,
 // the sole source of truth, and only while something is actually moving.
 function remotePlaybackPollInterval(uiVisible, useRemote, hasLocal, playing) {
   if (uiVisible !== true) return 15000
-  // A Connect device tells us nothing until we ask.
-  if (useRemote === true) return playing === true ? 5000 : 15000
-  // Playing here: MPRIS is authoritative, so this only watches for a Connect
-  // device taking over.
-  if (hasLocal === true) return 60000
+  if (hasLocal === true && playing === true) return 60000
+  if (useRemote === true && playing === true) return 5000
   return 15000
 }
 

@@ -3536,7 +3536,10 @@ Item {
       ? surface[method]() : "unavailable"
   }
   IpcHandler {
-    target: "quickshell.spotify.player"
+    // Our own id, not the name this was forked from. Hardcoding the old one
+    // broke the commands the README documents, and collided with the original
+    // plugin when both are installed.
+    target: root.pluginId + ".player"
     function configuredPlayer(): string { return root.shortcutPlayer }
     function togglePlayer(): string { return root.invokePlayerShortcut("toggleConfiguredPlayerShortcut") }
     function toggleMiniPlayer(): string { return root.invokePlayerShortcut("toggleMiniPlayerShortcut") }
@@ -4770,7 +4773,6 @@ Item {
     // Five minutes was ten times more often than that needs.
     interval: 900000
     repeat: true
-    // Also while music plays with the panel shut.
     running: root.uiVisible || root.playing
     onTriggered: root.refreshPlayHistory(false)
   }
