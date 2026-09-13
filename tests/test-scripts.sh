@@ -568,4 +568,32 @@ grep -qx 'Environment=PULSE_LATENCY_MSEC=30' \
 grep -qx 'Environment=TOKIO_WORKER_THREADS=2' \
   "$source_root/systemd/omaspotify.service"
 
+# The equalizer finds this plugin's audio by the name the backend installs as.
+equalizer_bin="$test_root/equalizer-bin"
+mkdir -p "$equalizer_bin"
+cat >"$equalizer_bin/pw-dump" <<'EOF'
+#!/usr/bin/env bash
+cat <<'JSON'
+[
+  {
+    "id": 122,
+    "info": {
+      "props": {
+        "media.class": "Stream/Output/Audio",
+        "application.process.binary": "omaspotify-backend",
+        "object.serial": 6655,
+        "node.name": "omaspotify"
+      }
+    }
+  }
+]
+JSON
+EOF
+printf '#!/usr/bin/env bash\nprintf "500;250;\\n"\n' >"$equalizer_bin/cava"
+chmod +x "$equalizer_bin/pw-dump" "$equalizer_bin/cava"
+equalizer_output=$(PATH="$equalizer_bin:$PATH" timeout 1 \
+  "$source_root/scripts/equalizer.sh" "$test_root/equalizer/cava.conf" 2 2>/dev/null || true)
+grep -qx '500;250;' <<<"$equalizer_output"
+grep -qx 'source = 6655' "$test_root/equalizer/cava.conf"
+
 echo "Script tests passed."

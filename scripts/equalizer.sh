@@ -12,7 +12,7 @@ set -u
 
 config_path=$1
 bars=${2:-48}
-backend_binary=${3:-omarchy-spotify-backend}
+backend_binary=${3:-omaspotify-backend}
 
 command -v cava >/dev/null 2>&1 || exit 127
 command -v pw-dump >/dev/null 2>&1 || exit 126

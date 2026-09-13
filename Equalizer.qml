@@ -66,6 +66,8 @@ Item {
     if (helper.running) helper.running = false
     levels = []
     streamIdle = true
+    // Try again next time the view opens, so installing cava needs no restart.
+    unavailable = false
   }
 
   function cycleMode() {

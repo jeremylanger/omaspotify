@@ -494,7 +494,7 @@ Item {
       ? String(state.equalizerMode) : "bars"
     var restoredTab = String(state.tab || "home")
     if (["home", "discover", "search", "library", "playlists", "detail", "queue",
-      "nowplaying", "stats", "devices", "setup"]
+      "stats", "devices", "setup"]
         .indexOf(restoredTab) >= 0) currentTab = restoredTab
     if (restoreDetail !== false && currentTab === "detail" && state.detailItem) {
       var sameDetail = service.detailItem
@@ -1066,6 +1066,8 @@ Item {
   }
 
   function panelCursorRegions() {
+    // Only the player is on screen while Now playing fills the window.
+    if (nowPlayingExpanded) return ["footer"]
     var regions = []
     if (sidebarCursorActions().length) regions.push("sidebar")
     regions.push("header")
@@ -1244,7 +1246,7 @@ Item {
     else if (action === "nav-discover") chooseTab("discover")
     else if (action === "nav-radio") openLastRadio()
     else if (action === "nav-queue") chooseTab("queue")
-    else if (action === "nav-nowplaying") chooseTab("nowplaying")
+    else if (action === "nav-nowplaying") toggleNowPlayingExpanded()
     else if (action === "nav-stats") chooseTab("stats")
     else if (action === "nav-library") chooseTab("library")
     else if (action === "nav-playlists") chooseTab("playlists")
@@ -1650,7 +1652,8 @@ Item {
       { action: "Open Settings", keys: "Ctrl+," },
       { action: "Open For You", keys: "Alt+Shift+H" },
       { action: "Open Queue", keys: "Alt+Shift+Q" },
-      { action: "Open Now playing", keys: "Alt+Shift+N" },
+      { action: "Open or close Now playing", keys: "E or Alt+Shift+N" },
+      { action: "Change the equalizer style in Now playing", keys: "V" },
       { action: "Open Your listening", keys: "Alt+Shift+I" },
       { action: "Open Devices", keys: "Alt+Shift+D" },
       { action: "Open the current artist", keys: "Ctrl+Shift+A" },
@@ -1909,7 +1912,7 @@ Item {
       artistSearchText = ""
       detailFilter = ""
     } else if (["home", "discover", "search", "library", "playlists", "queue",
-      "nowplaying", "stats", "devices", "setup"].indexOf(requestedTab) >= 0)
+      "stats", "devices", "setup"].indexOf(requestedTab) >= 0)
       currentTab = requestedTab
     if (accountConnected) {
       openedForLogin = false
@@ -2100,7 +2103,6 @@ Item {
     if (currentTab === "library") return libraryPage
     if (currentTab === "playlists") return playlistsPage
     if (currentTab === "detail") return detailPage
-    if (currentTab === "nowplaying") return nowPlayingPage
     if (currentTab === "stats") return statsPage
     if (currentTab === "queue") return queuePage
     if (currentTab === "devices") return devicesPage
@@ -2114,7 +2116,6 @@ Item {
     if (currentTab === "discover") return "Discover"
     if (currentTab === "library") return "Your Library"
     if (currentTab === "playlists") return "Playlists"
-    if (currentTab === "nowplaying") return "Now playing"
     if (currentTab === "stats") return "Your listening"
     if (currentTab === "queue") return "Queue"
     if (currentTab === "devices") return "Spotify Connect"
@@ -2555,7 +2556,7 @@ Item {
         enabled: root.accountConnected && !root.shortcutsBlocked
         onActivated: {
           root.latchShortcutMode(sequence)
-          root.chooseTab("nowplaying")
+          root.toggleNowPlayingExpanded()
         }
       }
       Shortcut {
@@ -2817,6 +2818,7 @@ Item {
                       root.primaryNavigationShortcut(modelData.id))
                   onClicked: {
                     if (radioEntry) root.openLastRadio()
+                    else if (modelData.id === "nowplaying") root.toggleNowPlayingExpanded()
                     else root.chooseTab(modelData.id)
                   }
                   onHovered: function(on) {
@@ -3362,7 +3364,6 @@ Item {
               id: unifiedSearchBar
               visible: root.currentTab !== "login" && root.currentTab !== "devices"
                 && root.currentTab !== "setup" && root.currentTab !== "stats"
-                && root.currentTab !== "nowplaying"
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.top: statusBanner.visible ? statusBanner.bottom : pageHeader.bottom
@@ -3512,10 +3513,12 @@ Item {
                   color: Style.selectedFillFor(root.foreground, root.accent)
                   borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
 
-                  Image {
+                  RetryImage {
+                    id: nowPlayingHeroImage
                     anchors.fill: parent
                     anchors.margins: Style.space(2)
-                    source: root.service ? root.service.artUrl : ""
+                    requestedSource: root.service && root.service.artworkEnabled
+                      ? root.service.artworkFor(root.service.artUrl) : ""
                     sourceSize.width: 640
                     sourceSize.height: 640
                     fillMode: Image.PreserveAspectFit
@@ -3526,7 +3529,7 @@ Item {
 
                   Text {
                     anchors.centerIn: parent
-                    visible: !root.service || root.service.artUrl === ""
+                    visible: nowPlayingHeroImage.status !== Image.Ready
                     text: "󰎈"
                     color: root.muted
                     font.family: root.fontFamily
@@ -3606,8 +3609,8 @@ Item {
                 anchors.bottom: parent.bottom
                 active: root.nowPlayingExpanded && window.visible
                 playing: root.service && root.service.playing
-                configPath: root.service && root.service.stateHome
-                  ? root.service.stateHome + "/omarchy-spotify/cava.conf" : ""
+                configPath: root.service && root.service.stateDir
+                  ? root.service.stateDir + "/cava.conf" : ""
                 scriptPath: root.service && root.service.pluginDir
                   ? root.service.pluginDir + "/scripts/equalizer.sh" : ""
                 mode: root.equalizerMode
@@ -4022,8 +4025,8 @@ Item {
                   }
                   KeyHint { region: "footer"; action: "lyrics"; sequences: ["Ctrl+Shift+L"] }
                 }
-                Button {
-                  iconText: root.nowPlayingExpanded ? "󰊔" : "󰊓"
+                TransportButton {
+                  glyphText: root.nowPlayingExpanded ? "󰊔" : "󰊓"
                   foreground: root.foreground
                   selected: root.nowPlayingExpanded
                   hasCursor: root.cursorOn("footer", "expand")
@@ -4298,14 +4301,6 @@ Item {
     id: statsPage
 
     StatsPage {
-      panel: root
-    }
-  }
-
-  Component {
-    id: nowPlayingPage
-
-    NowPlayingPage {
       panel: root
     }
   }
