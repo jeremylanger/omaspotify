@@ -2109,15 +2109,31 @@ TestCase {
     compare(Api.visibleLocalReceiverAction(true, true, true, false), "refresh")
   }
 
+  // Polling the Web API is the largest single source of traffic on a quota
+  // shared with every other app on this client id, and most of it asks about
+  // playback MPRIS already told us about for free.
+  function test_remotePlaybackPoll_leansOnMprisAndSlowsWhenIdle() {
+    // Playing on a Connect device: the Web API is the only source of position.
+    compare(Api.remotePlaybackPollInterval(true, true, false, true), 5000)
+    // Paused there, nothing is moving.
+    compare(Api.remotePlaybackPollInterval(true, true, false, false), 15000)
+    // Playing on this computer: MPRIS pushes every change, so the only reason
+    // to ask at all is to notice a Connect device taking over.
+    compare(Api.remotePlaybackPollInterval(true, false, true, true), 60000)
+    compare(Api.remotePlaybackPollInterval(true, false, true, false), 60000)
+    // Nothing playing anywhere, panel open: slow enough to be cheap, quick
+    // enough to notice a phone starting something.
+    compare(Api.remotePlaybackPollInterval(true, false, false, false), 15000)
+    // Panel shut, unchanged.
+    compare(Api.remotePlaybackPollInterval(false, true, false, true), 15000)
+  }
+
   function test_remotePlaybackPoll_skipsBackgroundLocalPlayback() {
     verify(Api.remotePlaybackPollShouldRun(true, false, true, false, true))
     verify(Api.remotePlaybackPollShouldRun(true, false, false, true, true))
     verify(!Api.remotePlaybackPollShouldRun(true, false, false, false, true))
     verify(!Api.remotePlaybackPollShouldRun(true, true, true, true, true))
     verify(!Api.remotePlaybackPollShouldRun(false, false, true, true, true))
-    compare(Api.remotePlaybackPollInterval(true, true, false), 5000)
-    compare(Api.remotePlaybackPollInterval(true, false, true), 15000)
-    compare(Api.remotePlaybackPollInterval(false, true, false), 15000)
   }
 
   function test_normalizedShortcutPlayer_mapsLegacyDefault() {

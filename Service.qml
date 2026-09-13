@@ -428,7 +428,9 @@ Item {
   property int savedUrisCheckingRevision: 0
   property int savedUrisBusyRevision: 0
   readonly property int savedUriCacheLimit: 4096
-  readonly property int savedUriFreshnessMs: 300000
+  // Whether a song is liked barely changes, and when you change it here we
+  // update it ourselves. Re-asking every five minutes bought nothing.
+  readonly property int savedUriFreshnessMs: 1800000
 
   property var recentTracks: []
   // Most recent play from Spotify's history, kept while nothing is loaded so
@@ -4763,10 +4765,12 @@ Item {
 
   Timer {
     id: playHistoryPollTimer
-    interval: 300000
+    // Spotify hands back the last fifty plays, which is hours of listening
+    // even on short tracks, so this only has to beat them falling off the end.
+    // Five minutes was ten times more often than that needs.
+    interval: 900000
     repeat: true
-    // Also while music plays with the panel shut: Spotify only hands back the
-    // last 50 plays, so the record has to be topped up before they fall off.
+    // Also while music plays with the panel shut.
     running: root.uiVisible || root.playing
     onTriggered: root.refreshPlayHistory(false)
   }
@@ -4889,7 +4893,7 @@ Item {
   Timer {
     id: remotePlaybackTimer
     interval: Api.remotePlaybackPollInterval(root.uiVisible,
-      root.useRemotePlayback, root.hasLocalPlayer)
+      root.useRemotePlayback, root.hasLocalPlayer, root.playing)
     repeat: true
     running: Api.remotePlaybackPollShouldRun(root.auth.loggedIn,
       root.remotePlaybackLoading, root.uiVisible, root.useRemotePlayback,

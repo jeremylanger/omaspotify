@@ -470,9 +470,19 @@ function remotePlaybackPollShouldRun(loggedIn, loading, uiVisible, useRemote,
   return useRemote === true && playing === true
 }
 
-function remotePlaybackPollInterval(uiVisible, useRemote, hasLocal) {
-  return uiVisible === true && (useRemote === true || hasLocal !== true)
-    ? 5000 : 15000
+// How often to ask Spotify what is playing. This is the largest single source
+// of traffic on a client id shared with every other app built on it, and most
+// of what it asked for was already known: MPRIS pushes local playback changes
+// as they happen and costs nothing. So the Web API is only hurried when it is
+// the sole source of truth, and only while something is actually moving.
+function remotePlaybackPollInterval(uiVisible, useRemote, hasLocal, playing) {
+  if (uiVisible !== true) return 15000
+  // A Connect device tells us nothing until we ask.
+  if (useRemote === true) return playing === true ? 5000 : 15000
+  // Playing here: MPRIS is authoritative, so this only watches for a Connect
+  // device taking over.
+  if (hasLocal === true) return 60000
+  return 15000
 }
 
 function normalizedShortcutPlayer(value) {
