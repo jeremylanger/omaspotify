@@ -422,6 +422,53 @@ TestCase {
     verify(!Api.jobMayRunDuringCooldown(null, false))
   }
 
+  // A personal client id has its own quota but loses the catalog endpoints a
+  // grandfathered app still reaches, so what it refuses is tried once through
+  // the shared one.
+  function test_sharedClientFallback_onlyForRefusalsItCanAnswer() {
+    var catalog = "/artists/abc/related-artists"
+    verify(Api.shouldFallBackToSharedClient(403, false, true, "GET", catalog))
+    verify(Api.shouldFallBackToSharedClient(400, false, true, "GET", catalog),
+      "catalog refusals arrive as a bogus parameter error")
+    verify(Api.shouldFallBackToSharedClient(404, false, true, "GET", catalog))
+
+    verify(!Api.shouldFallBackToSharedClient(401, false, true, "GET", catalog),
+      "a token to refresh, not a permission problem")
+    verify(!Api.shouldFallBackToSharedClient(429, false, true, "GET", catalog),
+      "slow down rather than spend someone else's quota")
+    verify(!Api.shouldFallBackToSharedClient(200, false, true, "GET", catalog))
+    verify(!Api.shouldFallBackToSharedClient(500, false, true, "GET", catalog))
+
+    verify(!Api.shouldFallBackToSharedClient(403, true, true, "GET", catalog),
+      "only once")
+    verify(!Api.shouldFallBackToSharedClient(403, false, false, "GET", catalog),
+      "nothing to fall back to")
+  }
+
+  // The shared quota is the thing we are trying to stop spending, so only the
+  // requests a personal client genuinely cannot answer are sent to it.
+  function test_sharedClientFallback_staysOffAnythingItCannotHelpWith() {
+    verify(!Api.shouldFallBackToSharedClient(404, false, true, "PUT",
+      "/me/player/play"), "never repeat something that changes state")
+    verify(!Api.shouldFallBackToSharedClient(403, false, true, "POST",
+      "/playlists/abc/tracks"))
+    verify(!Api.shouldFallBackToSharedClient(400, false, true, "DELETE",
+      "/playlists/abc/tracks"))
+
+    verify(!Api.shouldFallBackToSharedClient(403, false, true, "GET",
+      "/me/tracks"), "your own library reads fine on your own client")
+    verify(!Api.shouldFallBackToSharedClient(404, false, true, "GET",
+      "https://api.spotify.com/v1/me/albums?offset=50"),
+      "including when it arrives as a paging cursor")
+
+    verify(Api.shouldFallBackToSharedClient(403, false, true, "GET",
+      "https://api.spotify.com/v1/artists/abc/albums"),
+      "a catalog cursor still falls back")
+    verify(Api.shouldFallBackToSharedClient(400, false, true, "GET", "/tracks"))
+    verify(Api.shouldFallBackToSharedClient(403, false, true, "GET",
+      "/browse/new-releases"))
+  }
+
   // A refusal aimed at the library crawl must not freeze the page someone just
   // opened. Only their own request being refused holds them back.
   function test_apiCooldown_keepsBackgroundRefusalsOffTheOpenPage() {
@@ -2109,15 +2156,33 @@ TestCase {
     compare(Api.visibleLocalReceiverAction(true, true, true, false), "refresh")
   }
 
+  // Polling the Web API is the largest single source of traffic on a quota
+  // shared with every other app on this client id, and most of it asks about
+  // playback MPRIS already told us about for free.
+  function test_remotePlaybackPoll_leansOnMprisAndSlowsWhenIdle() {
+    // Playing on a Connect device: the Web API is the only source of position.
+    compare(Api.remotePlaybackPollInterval(true, true, false, true), 5000)
+    // Paused there, nothing is moving.
+    compare(Api.remotePlaybackPollInterval(true, true, false, false), 15000)
+    // Playing on this computer: MPRIS pushes every change, so the only reason
+    // to ask at all is to notice a Connect device taking over.
+    compare(Api.remotePlaybackPollInterval(true, false, true, true), 60000)
+    // But the engine merely running and idle is not MPRIS telling us anything,
+    // and someone may be about to start playing on their phone.
+    compare(Api.remotePlaybackPollInterval(true, false, true, false), 15000)
+    // Nothing playing anywhere, panel open: slow enough to be cheap, quick
+    // enough to notice a phone starting something.
+    compare(Api.remotePlaybackPollInterval(true, false, false, false), 15000)
+    // Panel shut, unchanged.
+    compare(Api.remotePlaybackPollInterval(false, true, false, true), 15000)
+  }
+
   function test_remotePlaybackPoll_skipsBackgroundLocalPlayback() {
     verify(Api.remotePlaybackPollShouldRun(true, false, true, false, true))
     verify(Api.remotePlaybackPollShouldRun(true, false, false, true, true))
     verify(!Api.remotePlaybackPollShouldRun(true, false, false, false, true))
     verify(!Api.remotePlaybackPollShouldRun(true, true, true, true, true))
     verify(!Api.remotePlaybackPollShouldRun(false, false, true, true, true))
-    compare(Api.remotePlaybackPollInterval(true, true, false), 5000)
-    compare(Api.remotePlaybackPollInterval(true, false, true), 15000)
-    compare(Api.remotePlaybackPollInterval(false, true, false), 15000)
   }
 
   function test_normalizedShortcutPlayer_mapsLegacyDefault() {

@@ -31,9 +31,14 @@ Item {
     ? (customClientId ? customClientId.toLowerCase() : clientId) : ""
   property bool initialized: false
   property bool switchingIdentity: false
+  // An identity whose client id never changes has nothing to trigger a session
+  // restore, because that only happens when the id changes. The primary one
+  // gets that for free when settings arrive and a personal id appears.
+  property bool restoreOnStart: false
   Component.onCompleted: {
     initialized = true
     if (!validClientId) changeIdentity()
+    else if (restoreOnStart) restoreSession()
   }
   onResolvedClientIdChanged: if (initialized) changeIdentity()
   property int oauthPort: 8989

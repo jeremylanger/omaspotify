@@ -186,17 +186,34 @@ and Spotify rate-limits requests **per app**, not per user. When that shared
 quota runs out you see `Spotify is busy. Try again in N seconds.` and searches
 that stall even though nothing is wrong on your side.
 
-You can use a personal [Spotify Developer app](https://developer.spotify.com/dashboard)
-with a separate quota. This does not provide unlimited requests or restore restricted endpoints.
+You can use a personal [Spotify Developer app](https://developer.spotify.com/dashboard),
+which has a quota of its own that nobody else is spending.
 
-1. Add `http://127.0.0.1:8989/login` as the app's redirect URI.
-2. Set **Spotify Developer app client ID** in the plugin settings. Leave it empty
-   to use the shipped app. Invalid IDs produce an error.
-3. Authorize the selected app. Changing the ID clears the current session and
-   account data; stored sessions are isolated by client ID.
+1. Create the app, and tick **Web API** under "Which API/SDKs are you planning to
+   use?". Nothing else is needed.
+2. Add `http://127.0.0.1:8989/login` as the app's redirect URI, exactly.
+3. Set **Spotify Developer app client ID** in the plugin settings and apply.
+   Leave it empty to use the shipped app. Invalid IDs produce an error.
+4. Authorize your app. Changing the ID clears the current session; stored
+   sessions are kept separate per client ID.
 
-Development apps require an eligible Premium owner and allowlisted users, and
-have endpoint restrictions. See Spotify's [quota modes](https://developer.spotify.com/documentation/web-api/concepts/quota-modes).
+**Keep the shipped app authorized as well.** Spotify
+[closed several endpoints to apps registered after November 2024](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api),
+and a personal app cannot reach an artist's albums, an artist's top songs,
+related artists, new releases, or several tracks at once. The shipped app
+predates that change, so OmaSpotify sends everything through your app and
+quietly asks the shipped one for just those. If you have never signed in with
+the shipped app, those parts of the artist page and the Home tab stay empty
+instead.
+
+This is a power-user option, not a recommendation for everyone. A
+development-mode app allows [five authorized users](https://developer.spotify.com/documentation/web-api/concepts/quota-modes),
+so it cannot be handed out to the people who install your fork, and it requires
+a Premium account. Since
+[July 2026](https://developer.spotify.com/blog/2026-07-23-web-api-quota-updates)
+a developer account may hold up to 25 client IDs, but the quota is counted per
+developer account rather than per ID, so making more of them does not buy more
+requests.
 The local Connect authorization remains separate.
 
 ### If playback setup fails

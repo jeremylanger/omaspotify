@@ -428,7 +428,14 @@ Item {
   property int savedUrisCheckingRevision: 0
   property int savedUrisBusyRevision: 0
   readonly property int savedUriCacheLimit: 4096
-  readonly property int savedUriFreshnessMs: 300000
+  // A personal client id is in use, so the shipped one is worth keeping around
+  // for the endpoints Spotify will not let a new app reach.
+  readonly property bool usingPersonalClientId:
+    String(settings.clientId || "").trim() !== ""
+
+  // Whether a song is liked barely changes, and when you change it here we
+  // update it ourselves. Re-asking every five minutes bought nothing.
+  readonly property int savedUriFreshnessMs: 1800000
 
   property var recentTracks: []
   // Most recent play from Spotify's history, kept while nothing is loaded so
@@ -3534,7 +3541,10 @@ Item {
       ? surface[method]() : "unavailable"
   }
   IpcHandler {
-    target: "quickshell.spotify.player"
+    // Our own id, not the name this was forked from. Hardcoding the old one
+    // broke the commands the README documents, and collided with the original
+    // plugin when both are installed.
+    target: root.pluginId + ".player"
     function configuredPlayer(): string { return root.shortcutPlayer }
     function togglePlayer(): string { return root.invokePlayerShortcut("toggleConfiguredPlayerShortcut") }
     function toggleMiniPlayer(): string { return root.invokePlayerShortcut("toggleMiniPlayerShortcut") }
@@ -4763,10 +4773,11 @@ Item {
 
   Timer {
     id: playHistoryPollTimer
-    interval: 300000
+    // Spotify hands back the last fifty plays, which is hours of listening
+    // even on short tracks, so this only has to beat them falling off the end.
+    // Five minutes was ten times more often than that needs.
+    interval: 900000
     repeat: true
-    // Also while music plays with the panel shut: Spotify only hands back the
-    // last 50 plays, so the record has to be topped up before they fall off.
     running: root.uiVisible || root.playing
     onTriggered: root.refreshPlayHistory(false)
   }
@@ -4889,7 +4900,7 @@ Item {
   Timer {
     id: remotePlaybackTimer
     interval: Api.remotePlaybackPollInterval(root.uiVisible,
-      root.useRemotePlayback, root.hasLocalPlayer)
+      root.useRemotePlayback, root.hasLocalPlayer, root.playing)
     repeat: true
     running: Api.remotePlaybackPollShouldRun(root.auth.loggedIn,
       root.remotePlaybackLoading, root.uiVisible, root.useRemotePlayback,
@@ -4989,6 +5000,16 @@ Item {
     customClientId: settings.clientId
   }
 
+  // Pinned to the shipped client id, which predates Spotify closing the catalog
+  // endpoints to new apps and so still reaches them. Only used for what a
+  // personal client id is refused, and only when one is configured: without
+  // that, authManager is already this identity.
+  AuthManager {
+    id: catalogAuthManager
+    pluginDir: root.pluginDir
+    restoreOnStart: true
+  }
+
   AuthManager {
     id: connectAuthManager
     pluginDir: root.pluginDir
@@ -5000,6 +5021,10 @@ Item {
   SpotifyApi {
     id: spotifyApi
     auth: authManager
+    // Only when it actually has a session of its own. Otherwise the retry
+    // would fail with "Not logged in" and hide the refusal that caused it.
+    fallbackAuth: root.usingPersonalClientId && catalogAuthManager.loggedIn
+      ? catalogAuthManager : null
   }
 
   SpotifyConnectManager {

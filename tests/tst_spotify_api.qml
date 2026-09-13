@@ -19,6 +19,7 @@ TestCase {
   property bool failFactory: false
   property bool failOpen: false
   property bool failSend: false
+  property int sharedInvalidations: 0
 
   QtObject {
     id: fakeAuth
@@ -27,6 +28,13 @@ TestCase {
       callback(testCase.accessToken, testCase.accessTokenError)
     }
     function invalidateAccessToken() { testCase.tokenInvalidations++ }
+  }
+
+  QtObject {
+    id: fakeSharedAuth
+
+    function withAccessToken(callback) { callback("shared-token", "") }
+    function invalidateAccessToken() { testCase.sharedInvalidations++ }
   }
 
   Component {
@@ -58,7 +66,10 @@ TestCase {
         this.url = url
         this.readyState = XMLHttpRequest.OPENED
       },
-      setRequestHeader: function() {},
+      authorization: "",
+      setRequestHeader: function(name, value) {
+        if (String(name).toLowerCase() === "authorization") this.authorization = value
+      },
       getResponseHeader: function(name) {
         return String(name).toLowerCase() === "retry-after" ? this.retryAfter : ""
       },
@@ -87,6 +98,7 @@ TestCase {
     failFactory = false
     failOpen = false
     failSend = false
+    sharedInvalidations = 0
   }
 
   function test_priorityStartsMutationsThenInteractiveReads() {
@@ -289,6 +301,57 @@ TestCase {
     clock = api.interactiveLimitedUntil
     api.pumpRequests()
     compare(requests.length, 2)
+  }
+
+  // A personal client id is refused the catalog endpoints, so what it cannot
+  // answer is asked again through the shipped one.
+  function test_catalogRefusalIsRetriedThroughTheSharedClient() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.fallbackAuth = fakeSharedAuth
+    var results = []
+    api.request("GET", "/artists/abc/related-artists", null, null,
+      function(status) { results.push(status) })
+    compare(requests.length, 1)
+    complete(requests[0], 403)
+
+    compare(results.length, 0, "the caller is not told about the first refusal")
+    compare(requests.length, 2, "it is asked again")
+    complete(requests[1], 200)
+    compare(results, [200])
+  }
+
+  function test_theRetryUsesTheOtherIdentitysToken() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.fallbackAuth = fakeSharedAuth
+    api.request("GET", "/artists/abc/albums", null, null, function() {})
+    complete(requests[0], 400)
+    compare(requests.length, 2)
+    compare(requests[1].authorization, "Bearer shared-token")
+  }
+
+  function test_aTokenProblemRefreshesRatherThanSwitchingIdentity() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.fallbackAuth = fakeSharedAuth
+    api.request("GET", "/me", null, null, function() {})
+    complete(requests[0], 401)
+    compare(tokenInvalidations, 1, "the identity that failed is refreshed")
+    compare(sharedInvalidations, 0)
+    compare(requests.length, 2)
+    compare(requests[1].authorization, "Bearer mock-token", "still the personal id")
+  }
+
+  function test_withoutAPersonalIdNothingIsRetriedElsewhere() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    var results = []
+    api.request("GET", "/artists/abc/related-artists", null, null,
+      function(status) { results.push(status) })
+    complete(requests[0], 403)
+    compare(requests.length, 1, "there is nowhere else to ask")
+    compare(results, [403])
   }
 
   function test_default429StillRetriesAfterCooldown() {

@@ -403,6 +403,31 @@ function foregroundCooldownMs(nowMs, until, since, capMs) {
   return remaining > 0 ? Math.ceil(Math.min(wait, remaining)) : 0
 }
 
+// A personal client id gets its own quota, but Spotify stopped giving new apps
+// the catalog endpoints, so it answers 403 for related artists and a bogus
+// "Invalid limit" 400 for an artist's albums. The shipped id predates that
+// change and still reaches them, so what the personal one refuses is tried
+// once through it. 401 is a token to refresh, and 429 means slow down rather
+// than go spend the shared quota instead.
+function shouldFallBackToSharedClient(status, alreadyFellBack, hasFallback,
+    method, path) {
+  if (hasFallback !== true || alreadyFellBack === true) return false
+  // Never repeat something that changes state, and never send your own library
+  // to the shared quota: a personal client reads /me perfectly well, so a
+  // refusal there is a real error rather than a closed endpoint.
+  if (String(method || "GET").toUpperCase() !== "GET") return false
+  if (apiRequestPath(path).indexOf("/me") === 0) return false
+  var code = Number(status) || 0
+  if (code === 401 || code === 429) return false
+  return code >= 400 && code < 500
+}
+
+// Paging cursors come back as absolute urls, so compare the path either way.
+function apiRequestPath(path) {
+  var value = String(path || "")
+  return value.indexOf(API_BASE) === 0 ? value.slice(API_BASE.length) : value
+}
+
 function nextRateLimitedUntil(now, retryAfter, currentUntil, attempt) {
   var proposed = (Number(now) || 0) + rateLimitRetryMs(retryAfter, attempt)
   var existing = Number(currentUntil) || 0
@@ -470,9 +495,16 @@ function remotePlaybackPollShouldRun(loggedIn, loading, uiVisible, useRemote,
   return useRemote === true && playing === true
 }
 
-function remotePlaybackPollInterval(uiVisible, useRemote, hasLocal) {
-  return uiVisible === true && (useRemote === true || hasLocal !== true)
-    ? 5000 : 15000
+// How often to ask Spotify what is playing. This is the largest single source
+// of traffic on a client id shared with every other app built on it, and most
+// of what it asked for was already known: MPRIS pushes local playback changes
+// as they happen and costs nothing. So the Web API is only hurried when it is
+// the sole source of truth, and only while something is actually moving.
+function remotePlaybackPollInterval(uiVisible, useRemote, hasLocal, playing) {
+  if (uiVisible !== true) return 15000
+  if (hasLocal === true && playing === true) return 60000
+  if (useRemote === true && playing === true) return 5000
+  return 15000
 }
 
 function normalizedShortcutPlayer(value) {
