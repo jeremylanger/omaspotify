@@ -19,14 +19,47 @@ Item {
   readonly property string pluginId: "stappmus.lyrics"
   readonly property string pluginUrl: "https://github.com/stappmus/Omasing.git"
 
+  // The host gives services a scoped registry that only lists their own
+  // manifest (no inBar()), so detect Omasing from the filesystem instead.
+  readonly property string homeDirectory: Quickshell.env("HOME") || ""
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME")
+    || (homeDirectory ? homeDirectory + "/.config" : ".config")
+  readonly property string omasingManifestPath: configHome + "/omarchy/plugins/stappmus.lyrics/manifest.json"
+  readonly property string shellConfigPath: configHome + "/omarchy/shell.json"
+
+  property bool omasingManifestPresent: false
+  property bool omasingInBar: false
+
   readonly property string availability: {
     var plugins = pluginRegistry && pluginRegistry.installedPlugins
       ? pluginRegistry.installedPlugins : ({})
-    var installed = !!plugins[pluginId]
-    var enabled = installed && pluginRegistry
-      && typeof pluginRegistry.inBar === "function"
-      && pluginRegistry.inBar(pluginId)
-    return Api.optionalPluginState(installed, enabled)
+    if (plugins[pluginId]) {
+      var enabled = pluginRegistry
+        && typeof pluginRegistry.inBar === "function"
+        && pluginRegistry.inBar(pluginId)
+      return Api.optionalPluginState(true, enabled === true)
+    }
+    if (!omasingManifestPresent) return "missing"
+    return omasingInBar ? "ready" : "disabled"
+  }
+
+  function updateOmasingInBar(raw) {
+    var found = false
+    try {
+      var config = JSON.parse(String(raw || ""))
+      var layout = config && config.bar && config.bar.layout
+      var sections = ["left", "center", "right"]
+      for (var s = 0; s < sections.length && !found; s++) {
+        var entries = layout ? layout[sections[s]] : null
+        if (!entries || !entries.length) continue
+        for (var i = 0; i < entries.length; i++) {
+          var entry = entries[i]
+          var id = entry && typeof entry === "object" ? entry.id : entry
+          if (String(id || "") === pluginId) { found = true; break }
+        }
+      }
+    } catch (e) { found = false }
+    omasingInBar = found
   }
 
   property bool busy: false
@@ -257,5 +290,25 @@ Item {
     stdout: StdioCollector { waitForEnd: true }
     stderr: StdioCollector { id: launchStderr; waitForEnd: true }
     onExited: function(exitCode) { lyrics.finishLaunch(exitCode) }
+  }
+
+  FileView {
+    id: omasingManifestFile
+    path: lyrics.omasingManifestPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: lyrics.omasingManifestPresent = true
+    onLoadFailed: lyrics.omasingManifestPresent = false
+  }
+
+  FileView {
+    id: shellConfigFile
+    path: lyrics.shellConfigPath
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: lyrics.updateOmasingInBar(text())
+    onLoadFailed: lyrics.updateOmasingInBar("")
   }
 }
