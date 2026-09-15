@@ -10,7 +10,9 @@ Changes below start from the fork point. For the history of the original plugin,
   personal Spotify client ID is set.
 - Stopped erasing the saved library and listening history when the shell
   starts or reloads, such as when a monitor sleeps, with a personal Spotify
-  client ID set. Only Log out clears them now.
+  client ID set. Only Log out clears them now. Settings also no longer reset
+  to their defaults for a moment while the shell rebuilds, from Omarchy
+  Spotify [#78](https://github.com/stappmus/Omarchy-Spotify/pull/78).
 - `Ctrl+F` and `/` now start a search across all of Spotify; press again to
   search the current area. From upstream.
 - Now playing is a full-window view with a live equalizer in the theme's

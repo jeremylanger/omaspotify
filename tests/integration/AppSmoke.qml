@@ -10,6 +10,10 @@ ShellRoot {
     interval: 20
     running: true
     onTriggered: {
+      spotifyService.applySettings({ deviceName: "Desk" })
+      spotifyService.applySettings({})
+      if (spotifyService.deviceName !== "Desk")
+        throw new Error("A blank settings push reset saved settings")
       spotifyService.libraryCacheReady = false
       spotifyService.applyLibraryCacheFile(JSON.stringify({ version: 1, playlists: [
         { id: "r", uri: "spotify:playlist:r", ownerId: "spotify" },

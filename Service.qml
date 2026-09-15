@@ -706,6 +706,8 @@ Item {
   }
 
   function applySettings(values) {
+    // The shell pushes blank settings while it starts or rebuilds; they are not a real change.
+    if (!values || Object.keys(values).length === 0) return
     var previousDeviceName = deviceName
     var next = normalizedSettings(values)
     if (JSON.stringify(next) !== JSON.stringify(settings)) settings = next
