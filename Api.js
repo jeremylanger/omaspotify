@@ -422,6 +422,18 @@ function shouldFallBackToSharedClient(status, alreadyFellBack, hasFallback,
   return code >= 400 && code < 500
 }
 
+function isSpotifyPlaylist(playlist) {
+  return !!playlist && String(playlist.ownerId || "") === "spotify"
+}
+
+// Newer apps get a playlist list without Spotify's own, so those are fetched apart and swapped in.
+function withSpotifyPlaylists(playlists, spotifyOwn) {
+  var mine = (Array.isArray(playlists) ? playlists : []).filter(function(playlist) {
+    return !isSpotifyPlaylist(playlist)
+  })
+  return mergeUnique(mine, spotifyOwn)
+}
+
 // Paging cursors come back as absolute urls, so compare the path either way.
 function apiRequestPath(path) {
   var value = String(path || "")
@@ -1879,7 +1891,7 @@ function sessionRecordFromPluginSettings(source) {
 function searchShortcutAction(searchFocused, scopeAvailable, searchInContext) {
   if (searchFocused === true)
     return scopeAvailable === true ? "toggle-scope" : "focus"
-  if (scopeAvailable === true && searchInContext !== true) return "enter-context"
+  if (scopeAvailable === true && searchInContext === true) return "enter-global"
   return "focus"
 }
 

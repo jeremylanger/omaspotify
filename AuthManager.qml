@@ -76,6 +76,8 @@ Item {
   signal sessionUnavailable(string reason)
 
   function changeIdentity() {
+    // Settings arriving at startup also change the id; nobody was signed in yet.
+    var wasSignedIn = loggedIn
     switchingIdentity = true
     cancelLogin()
     lookupHandled = true
@@ -83,7 +85,7 @@ Item {
     resetMemorySession()
     sessionChecked = false
     finishWaiters("", "Spotify application changed. Sign in again.")
-    loggedOut()
+    if (wasSignedIn) loggedOut()
     lastError = validClientId ? "" : "Enter a Spotify client ID containing exactly 32 hexadecimal characters."
     identityDrain.restart()
   }

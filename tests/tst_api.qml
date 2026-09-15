@@ -469,6 +469,17 @@ TestCase {
       "/browse/new-releases"))
   }
 
+  // Spotify's own playlists arrive in a list of their own, so they replace the old copies.
+  function test_withSpotifyPlaylists_replacesOnlySpotifysOwn() {
+    var mine = { id: "m", uri: "spotify:playlist:m", ownerId: "jeremy" }
+    var stale = { id: "r", uri: "spotify:playlist:r", ownerId: "spotify", name: "old" }
+    var unfollowed = { id: "u", uri: "spotify:playlist:u", ownerId: "spotify" }
+    var fresh = { id: "r", uri: "spotify:playlist:r", ownerId: "spotify", name: "new" }
+    var merged = Api.withSpotifyPlaylists([mine, stale, unfollowed], [fresh])
+    compare(merged.map(function(p) { return p.id + ":" + (p.name || "") }),
+      ["m:", "r:new"])
+  }
+
   // A refusal aimed at the library crawl must not freeze the page someone just
   // opened. Only their own request being refused holds them back.
   function test_apiCooldown_keepsBackgroundRefusalsOffTheOpenPage() {
@@ -2564,9 +2575,9 @@ TestCase {
     compare(Api.shortcutModifierFlagsAfterEvent(3, true, 0, 0), 3)
   }
 
-  function test_searchShortcutAction_focusesThenTogglesScope() {
-    compare(Api.searchShortcutAction(false, true, true), "focus")
-    compare(Api.searchShortcutAction(false, true, false), "enter-context")
+  function test_searchShortcutAction_startsGlobalThenTogglesScope() {
+    compare(Api.searchShortcutAction(false, true, true), "enter-global")
+    compare(Api.searchShortcutAction(false, true, false), "focus")
     compare(Api.searchShortcutAction(true, true, true), "toggle-scope")
     compare(Api.searchShortcutAction(true, true, false), "toggle-scope")
     compare(Api.searchShortcutAction(false, false, true), "focus")

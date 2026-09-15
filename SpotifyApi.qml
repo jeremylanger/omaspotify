@@ -15,7 +15,7 @@ Item {
   height: 0
 
   required property var auth
-  // The shipped client id, kept only for what a personal one is refused. Null
+  // The shipped client id, kept for what a personal one is refused or not shown. Null
   // when there is no personal id, in which case `auth` is already the shipped
   // one and there is nothing to fall back to.
   property var fallbackAuth: null
@@ -273,6 +273,12 @@ Item {
     }
     url = Api.appendQuery(url, job.query)
 
+    // Your own client would only repeat your own list, so a shared request has nowhere else to go.
+    if (job.shared === true && !fallbackAuth) {
+      finishJob(job, 0, null, "Not logged in", null)
+      return
+    }
+    if (job.shared === true) job.fellBack = true
     var identity = job.fellBack === true && fallbackAuth ? fallbackAuth : auth
     identity.withAccessToken(function(token, tokenError) {
       job.authedAt = now()
@@ -333,8 +339,9 @@ Item {
           }
           // Refused by the personal client: try the shipped one, which still
           // reaches the catalog endpoints Spotify closed to new apps.
+          // Without a session of its own, the retry would hide the refusal behind "Not logged in".
           if (Api.shouldFallBackToSharedClient(xhr.status, job.fellBack,
-              !!fallbackAuth, job.method, job.path)) {
+              !!fallbackAuth && fallbackAuth.loggedIn === true, job.method, job.path)) {
             job.fellBack = true
             job.activeDeadlineAt = 0
             requestQueue = Api.enqueueApiJob(requestQueue, job)
@@ -383,6 +390,7 @@ Item {
       callback: callback,
       retried: false,
       fellBack: false,
+      shared: settings.shared === true,
       rateLimitRetries: 0,
       retryRateLimit: settings.retryRateLimit !== false,
       priority: String(settings.priority || ""),

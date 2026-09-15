@@ -6,6 +6,13 @@ OmaSpotify is a fork of [Omarchy Spotify](https://github.com/stappmus/Omarchy-Sp
 Changes below start from the fork point. For the history of the original plugin, see
 [its changelog](https://github.com/stappmus/Omarchy-Spotify/blob/main/CHANGELOG.md).
 
+- Show Spotify's own playlists, like On Repeat, in the library when a
+  personal Spotify client ID is set.
+- Stopped erasing the saved library and listening history when the shell
+  starts or reloads, such as when a monitor sleeps, with a personal Spotify
+  client ID set. Only Log out clears them now.
+- `Ctrl+F` and `/` now start a search across all of Spotify; press again to
+  search the current area. From upstream.
 - Now playing is a full-window view with a live equalizer in the theme's
   colours, by Peter Sønderby ([#84](https://github.com/stappmus/Omarchy-Spotify/issues/84)).
   Open it with `E`, `Alt+Shift+N`, the sidebar, or the player artwork, and

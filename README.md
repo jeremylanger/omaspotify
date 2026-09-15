@@ -45,8 +45,8 @@ too.
 
 | Shortcut | What it does |
 | --- | --- |
-| `Ctrl+F` or `/` | Search |
-| `Ctrl+F` or `/` again | Toggle this area / all of Spotify |
+| `Ctrl+F` or `/` | Search all of Spotify |
+| `Ctrl+F` or `/` again | Toggle current area / all of Spotify |
 | `Tab` / `F6` | Move between sidebar, search, the song list, and the player |
 | `Arrow keys` | Move to a control; Enter activates |
 | `C` | Row actions; arrows or Enter choose |
@@ -200,11 +200,12 @@ which has a quota of its own that nobody else is spending.
 **Keep the shipped app authorized as well.** Spotify
 [closed several endpoints to apps registered after November 2024](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api),
 and a personal app cannot reach an artist's albums, an artist's top songs,
-related artists, new releases, or several tracks at once. The shipped app
-predates that change, so OmaSpotify sends everything through your app and
-quietly asks the shipped one for just those. If you have never signed in with
-the shipped app, those parts of the artist page and the Home tab stay empty
-instead.
+related artists, new releases, or several tracks at once. Spotify also leaves
+its own playlists, like On Repeat and Your Top Songs, out of your playlist list.
+The shipped app predates that change, so OmaSpotify sends everything through
+your app and quietly asks the shipped one for just those. If you have never
+signed in with the shipped app, those parts of the artist page and the Home
+tab stay empty, and Spotify's playlists are missing from your library.
 
 This is a power-user option, not a recommendation for everyone. A
 development-mode app allows [five authorized users](https://developer.spotify.com/documentation/web-api/concepts/quota-modes),

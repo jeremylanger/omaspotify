@@ -20,6 +20,8 @@ TestCase {
   property bool failOpen: false
   property bool failSend: false
   property int sharedInvalidations: 0
+  property string sharedToken: "shared-token"
+  property bool sharedLoggedIn: true
 
   QtObject {
     id: fakeAuth
@@ -33,7 +35,10 @@ TestCase {
   QtObject {
     id: fakeSharedAuth
 
-    function withAccessToken(callback) { callback("shared-token", "") }
+    property bool loggedIn: testCase.sharedLoggedIn
+    function withAccessToken(callback) {
+      callback(testCase.sharedToken, testCase.sharedToken ? "" : "Log in to Spotify first")
+    }
     function invalidateAccessToken() { testCase.sharedInvalidations++ }
   }
 
@@ -99,6 +104,8 @@ TestCase {
     failOpen = false
     failSend = false
     sharedInvalidations = 0
+    sharedToken = "shared-token"
+    sharedLoggedIn = true
   }
 
   function test_priorityStartsMutationsThenInteractiveReads() {
@@ -341,6 +348,49 @@ TestCase {
     compare(sharedInvalidations, 0)
     compare(requests.length, 2)
     compare(requests[1].authorization, "Bearer mock-token", "still the personal id")
+  }
+
+  function test_aSharedRequestGoesThroughTheShippedClient() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.fallbackAuth = fakeSharedAuth
+    sharedLoggedIn = false
+    var results = []
+    api.request("GET", "/me/playlists", { limit: 50 }, null,
+      function(status) { results.push(status) }, { shared: true })
+    compare(requests[0].authorization, "Bearer shared-token",
+      "it waits for the shared client to finish signing in")
+    complete(requests[0], 403)
+    compare(requests.length, 1, "it is not asked twice on the same client")
+    compare(results, [403])
+  }
+
+  function test_aSharedRequestIsNotSentWithoutASharedSession() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    var errors = []
+    api.request("GET", "/me/playlists", null, null,
+      function(status, payload, error) { errors.push(error) }, { shared: true })
+    api.fallbackAuth = fakeSharedAuth
+    sharedToken = ""
+    api.request("GET", "/me/playlists", null, null,
+      function(status, payload, error) { errors.push(error) }, { shared: true })
+    compare(requests.length, 0, "your own client would only repeat your own list")
+    compare(errors.length, 2)
+    verify(errors[0] !== "" && errors[1] !== "")
+  }
+
+  function test_aSignedOutSharedClientIsNotAskedAgain() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    verify(api)
+    api.fallbackAuth = fakeSharedAuth
+    sharedLoggedIn = false
+    var results = []
+    api.request("GET", "/artists/abc/related-artists", null, null,
+      function(status) { results.push(status) })
+    complete(requests[0], 403)
+    compare(requests.length, 1, "the refusal is not hidden behind a sign-in error")
+    compare(results, [403])
   }
 
   function test_withoutAPersonalIdNothingIsRetriedElsewhere() {

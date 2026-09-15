@@ -1644,8 +1644,8 @@ Item {
 
   function shortcutRows() {
     var rows = [
-      { section: "SEARCH", action: "Focus search", keys: "Ctrl+F or /" },
-      { action: "Toggle this area / all of Spotify", keys: "Ctrl+F or /" },
+      { section: "SEARCH", action: "Search all of Spotify", keys: "Ctrl+F or /" },
+      { action: "Toggle current area / all of Spotify", keys: "Ctrl+F or / again" },
       { action: "Leave search", keys: "Esc" },
       { section: "NAVIGATION", action: "Go back", keys: "Alt+Left" },
       { action: "Leave Settings or Devices", keys: "Esc" },
@@ -1839,7 +1839,7 @@ Item {
     if (!unifiedSearchBar.visible) return
     var action = Api.searchShortcutAction(unifiedSearchField.activeFocus,
       activeSearchScope.available, searchInContext)
-    if (action === "toggle-scope" || action === "enter-context")
+    if (action === "toggle-scope" || action === "enter-global")
       toggleSearchScope()
     else focusSearch()
   }
@@ -3423,8 +3423,9 @@ Item {
                 PanelToolTip {
                   visible: unifiedSearchField.hovered
                   text: root.activeSearchScope.available
-                    ? "Search · Ctrl+F or /\nPress again to toggle this area and all of Spotify"
-                    : "Search · Ctrl+F or /"
+                    ? "Search all of Spotify · Ctrl+F or /\nPress again to search in "
+                      + root.activeSearchScope.label
+                    : "Search all of Spotify · Ctrl+F or /"
                 }
                 KeyHint { region: "header"; action: "search"; sequences: ["/", "Ctrl+F"] }
               }

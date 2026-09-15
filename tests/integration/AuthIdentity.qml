@@ -11,10 +11,15 @@ ShellRoot {
     interval: 1
     running: true
     onTriggered: {
+    var signOuts = 0
+    auth.loggedOut.connect(function() { signOuts++ })
+    auth.customClientId = "22222222222222222222222222222222"
+    check(signOuts === 0, "Settings arriving at startup signed the user out")
     auth.accessToken = "old"
     auth.accessTokenExpiresAt = Date.now() + 3600000
     auth.loggedIn = true
     auth.customClientId = "invalid"
+    check(signOuts === 1, "Changing identity did not sign the user out")
     check(auth.accessToken === "", "Old access token survived identity change")
     check(!auth.loggedIn && !auth.validClientId, "Invalid identity was accepted")
     check(auth.resolvedClientId === "", "Invalid identity fell back silently")

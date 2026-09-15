@@ -374,6 +374,8 @@ Item {
     : (hasLocalPlayer ? deviceName : "")
 
   property var playlists: []
+  // Kept from the last good read, so a busy shared client does not drop them.
+  property var spotifyPlaylists: []
   property string playlistsNext: ""
   property var savedTracks: []
   property string savedTracksNext: ""
@@ -843,6 +845,7 @@ Item {
     libraryCacheReady = true
     var cached = Api.parseLibraryCache(raw)
     libraryCacheFetchedAt = cached.fetchedAt
+    spotifyPlaylists = cached.playlists.filter(Api.isSpotifyPlaylist)
     if (playlists.length === 0 && cached.playlists.length > 0)
       playlists = cached.playlists
     if (savedAlbums.length === 0 && cached.savedAlbums.length > 0)
@@ -922,7 +925,9 @@ Item {
 
   function flushLibraryCache() {
     libraryCacheSaveTimer.stop()
-    libraryCacheFetchedAt = Date.now()
+    // An empty copy is never trusted, so a wiped or failed library is asked for again.
+    libraryCacheFetchedAt = playlists.concat(savedAlbums, followedArtists,
+      savedShows).length ? Date.now() : 0
     libraryCacheFile.setText(Api.encodeLibraryCache(playlists, savedAlbums,
       followedArtists, savedShows, libraryCacheFetchedAt))
   }
@@ -1616,6 +1621,7 @@ Item {
     // requests that only help Spotify rate limit us.
     if (libraryCacheFresh) return
     fillSidebarCollection("playlists")
+    fillSpotifyPlaylists()
     fillSidebarCollection("albums")
     fillSidebarCollection("artists")
     fillSidebarCollection("shows")
@@ -1628,6 +1634,25 @@ Item {
     followedArtistsLoaded = false
     savedShowsLoaded = false
     loadSidebarPlaylists()
+  }
+
+  // Only the shipped client sees Spotify's own playlists, so they are read there on their own.
+  function fillSpotifyPlaylists() {
+    if (!usingPersonalClientId) return
+    var expected = dataSerial
+    var found = []
+    var ask = function(path, query, depth) {
+      spotifyApi.request("GET", path, query, null, function(status, payload, error) {
+        if (expected !== root.dataSerial || error) return
+        var page = Api.normalizePage(payload, root.libraryMapper("playlist"))
+        found = found.concat(page.items.filter(Api.isSpotifyPlaylist))
+        if (page.next && depth < 40) return ask(page.next, null, depth + 1)
+        root.spotifyPlaylists = found
+        root.playlists = Api.withSpotifyPlaylists(root.playlists, found)
+        root.saveLibraryCache()
+      }, { priority: "background", shared: true })
+    }
+    ask("/me/playlists", { limit: 50 }, 1)
   }
 
   // Keep paging until the collection is complete. Sorting half a library puts
@@ -1675,6 +1700,8 @@ Item {
     if (offsets.length === 0 || attempt > 2) {
       root[spec.next] = ""
       root[spec.loaded] = true
+      if (kind === "playlists" && usingPersonalClientId)
+        playlists = Api.withSpotifyPlaylists(playlists, spotifyPlaylists)
       saveLibraryCache()
       if (kind === "playlists") refreshPlaylistEdits()
       return
@@ -4311,6 +4338,8 @@ Item {
     connectAuthManager.logout()
     authManager.logout()
     clearData()
+    // Only a real sign-out forgets it; a changed or briefly blank client id must not.
+    forgetPersonalRecord()
   }
 
   function clearData() {
@@ -4321,6 +4350,7 @@ Item {
     resumeCandidateLoadedAt = 0
     radioContextSelected = false
     playlists = []
+    spotifyPlaylists = []
     playlistsLoaded = false
     playlistsNext = ""
     savedTracks = []
@@ -4447,7 +4477,7 @@ Item {
     localSocketWaitAttempts = 0
     localSocketWaitTimer.stop()
     cancelSleepTimer(false)
-    forgetPersonalRecord()
+    libraryCacheFetchedAt = 0
   }
 
   // What you listened to is yours, not the app's. Signing out has to take it
@@ -4475,7 +4505,6 @@ Item {
     lastPlayHistoryFetch = 0
     recentContextPlays = ({})
     listenWindowNow = 0
-    libraryCacheFetchedAt = 0
     sidebarItems = []
     playHistoryDirty = true
     if (playHistoryReady) flushPlayHistoryFile()
@@ -5021,10 +5050,8 @@ Item {
   SpotifyApi {
     id: spotifyApi
     auth: authManager
-    // Only when it actually has a session of its own. Otherwise the retry
-    // would fail with "Not logged in" and hide the refusal that caused it.
-    fallbackAuth: root.usingPersonalClientId && catalogAuthManager.loggedIn
-      ? catalogAuthManager : null
+    // Offered even while it is still signing in, so the playlist list can wait for it.
+    fallbackAuth: root.usingPersonalClientId ? catalogAuthManager : null
   }
 
   SpotifyConnectManager {
