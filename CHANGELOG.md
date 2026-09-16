@@ -10,6 +10,16 @@ Changes below start from the fork point. For the history of the original plugin,
   held only about 25 ms, so any brief stall in the decoder became an audible
   hole; it now holds 250 ms, which rides out a 140 ms stall while a pause still
   goes quiet in 142 ms.
+- The song playing now stands out in any list: the whole row takes an accent
+  wash, its title goes accent-coloured, and three bars move over its artwork.
+  They settle level when playback is paused.
+- A song's heart in a list now says whether it is liked, filled when it is and
+  an outline when it is not, and an unliked row only shows its heart on hover.
+  It used to be a filled heart meaning "save this", which disappeared once the
+  song was saved.
+- The song actions menu no longer hangs off the bottom of the window. It was
+  placed using the height of whatever menu opened last, so a taller list of
+  actions ran off the edge; it now works out its corner from its own height.
 - The sidebar's Settings button is now a cog in the title row, the Playlists
   button is gone because picking a playlist from the list below already opens
   it, and Liked Songs shares its row with Create playlist.

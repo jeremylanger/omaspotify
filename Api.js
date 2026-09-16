@@ -1168,6 +1168,13 @@ function sortedLibraryItems(items, mode, playedAt, pinned) {
   return result
 }
 
+// Whether a row in a list is the track coming out of the speakers.
+function itemIsPlaying(playingUri, item) {
+  var current = String(playingUri || "")
+  if (!current) return false
+  return !!item && String(item.uri || "") === current
+}
+
 // Spotify allows four pins; pinning a fifth drops the oldest.
 function togglePinned(pinned, uri, limit) {
   var list = Array.isArray(pinned) ? pinned.slice() : []

@@ -40,10 +40,20 @@ Popup {
   ShortcutModifiers {
     id: shortcutModifiers
   }
+  // Where the caller asked for the menu. Keeping the corner as a binding
+  // rather than a one-off assignment means a menu that grows a taller list of
+  // actions moves back on screen instead of hanging off the bottom.
+  property real requestedX: 0
+  property real requestedY: 0
+
   parent: popup.panel.windowContentItem
   width: Math.min(Style.space(310), popup.panel.windowWidth - Style.space(24))
   height: Math.min(popup.panel.windowHeight - Style.space(24),
     contextMenuContent.implicitHeight + padding * 2)
+  x: Math.max(Style.space(6),
+    Math.min(popup.panel.windowWidth - width - Style.space(6), requestedX))
+  y: Math.max(Style.space(6),
+    Math.min(popup.panel.windowHeight - height - Style.space(6), requestedY))
   padding: Style.space(6)
   modal: true
   dim: false

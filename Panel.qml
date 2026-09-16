@@ -340,10 +340,8 @@ Item {
       ? contextSourceUri : String(playbackContextUri || "")
     contextSourceIndex = index === undefined ? -1 : Math.floor(Number(index))
     contextPlaylist = playlistForContext(contextSourceUri)
-    mediaContextMenu.x = Math.max(Style.space(6), Math.min(
-      window.width - mediaContextMenu.width - Style.space(6), Number(sceneX) || 0))
-    mediaContextMenu.y = Math.max(Style.space(6), Math.min(
-      window.height - mediaContextMenu.height - Style.space(6), Number(sceneY) || 0))
+    mediaContextMenu.requestedX = Number(sceneX) || 0
+    mediaContextMenu.requestedY = Number(sceneY) || 0
     mediaContextMenu.open()
   }
 

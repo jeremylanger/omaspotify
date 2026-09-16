@@ -1181,6 +1181,18 @@ TestCase {
     compare(out.length, 1)
   }
 
+  function test_itemIsPlaying_matchesOnlyTheTrackNowPlaying() {
+    var playing = { uri: "spotify:track:abc" }
+    var other = { uri: "spotify:track:xyz" }
+    verify(Api.itemIsPlaying("spotify:track:abc", playing))
+    verify(!Api.itemIsPlaying("spotify:track:abc", other))
+    // Nothing playing, no row, or a row with no uri never matches.
+    verify(!Api.itemIsPlaying("", playing))
+    verify(!Api.itemIsPlaying("spotify:track:abc", null))
+    verify(!Api.itemIsPlaying("spotify:track:abc", {}))
+    verify(!Api.itemIsPlaying("", {}))
+  }
+
   function test_togglePinned_addsRemovesAndCaps() {
     var list = Api.togglePinned([], "a", 3)
     compare(list, ["a"])

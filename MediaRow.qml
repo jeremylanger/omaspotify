@@ -26,10 +26,14 @@ BorderSurface {
   property int reorderDropIndicator: 0
   property bool hovered: hoverHandler.hovered
   property bool actionsExpanded: false
+  readonly property bool playing: Api.itemIsPlaying(
+    service ? service.currentTrackItemUri : "", itemData)
+  // Paused still counts as the playing row; only the bars stop moving.
+  readonly property bool playingNow: playing && !!service && service.playing
 
   readonly property bool durationColumnVisible: itemData
     && itemData.kind === "item" && Number(itemData.durationMs) > 0
-  readonly property bool saveActionVisible: showSave && !saved && itemData
+  readonly property bool saveActionVisible: showSave && itemData
     && !!itemData.uri && itemData.type !== "chapter"
   readonly property bool playlistActionVisible: showPlaylist && itemData
     && ["track", "episode"].indexOf(itemData.type) >= 0
@@ -83,7 +87,8 @@ BorderSurface {
   color: selected || reorderDragging
     ? Style.selectedFillFor(foreground, accent)
     : (reorderDropIndicator !== 0 ? Style.hoverFillFor(foreground, accent)
-    : (hovered ? Style.hoverFillFor(foreground, accent) : "transparent"))
+    : (playing ? Qt.rgba(accent.r, accent.g, accent.b, 0.16)
+    : (hovered ? Style.hoverFillFor(foreground, accent) : "transparent")))
   borderSpec: selected || reorderDragging
     ? Border.controlSpec("selected", foreground, accent)
     : Border.none()
@@ -212,6 +217,55 @@ BorderSurface {
         font.family: root.fontFamily
         font.pixelSize: Style.font.iconLarge
       }
+
+      Rectangle {
+        anchors.fill: parent
+        anchors.margins: Style.space(2)
+        visible: root.playing
+        color: Qt.rgba(0, 0, 0, 0.5)
+        radius: Style.spacing.labelGap
+
+        Row {
+          anchors.centerIn: parent
+          spacing: Style.space(2)
+          readonly property real span: Style.space(16)
+
+          Repeater {
+            model: [
+              { peak: 1.0, beat: 480 },
+              { peak: 0.6, beat: 330 },
+              { peak: 0.82, beat: 610 }
+            ]
+
+            Rectangle {
+              required property var modelData
+              // The animation drives a level rather than the height, so a
+              // paused row settles back to an even row of bars.
+              property real level: 0.35
+              width: Style.space(3)
+              height: parent.span * (root.playingNow ? level : 0.35)
+              anchors.verticalCenter: parent.verticalCenter
+              radius: width / 2
+              color: root.accent
+
+              SequentialAnimation on level {
+                running: root.playingNow
+                loops: Animation.Infinite
+                NumberAnimation {
+                  to: modelData.peak
+                  duration: modelData.beat
+                  easing.type: Easing.InOutSine
+                }
+                NumberAnimation {
+                  to: 0.25
+                  duration: modelData.beat
+                  easing.type: Easing.InOutSine
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     Column {
@@ -226,10 +280,10 @@ BorderSurface {
         objectName: "media-row-title"
         width: parent.width
         text: root.itemData ? String(root.itemData.name || "Untitled") : "Untitled"
-        color: root.foreground
+        color: root.playing ? root.accent : root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
-        font.bold: root.selected
+        font.bold: root.selected || root.playing
         elide: Text.ElideRight
       }
 
@@ -278,10 +332,13 @@ BorderSurface {
         id: saveButton
         objectName: "media-row-save"
         visible: root.saveActionVisible
-        iconText: "󰋑"
+        // An unliked row keeps the space but only shows its heart on hover,
+        // so a list of liked songs is not a wall of outlines.
+        opacity: root.saved || root.hovered ? 1 : 0
+        iconText: root.saved ? "󰋑" : "󰋕"
         foreground: Color.urgent
         accent: Color.urgent
-        tooltipText: "Save to library"
+        tooltipText: root.saved ? "Remove from library" : "Save to library"
         horizontalPadding: Style.space(7)
         onClicked: root.saveRequested(root.itemData)
       }
