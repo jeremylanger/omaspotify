@@ -9,7 +9,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-Environment=PULSE_LATENCY_MSEC=30
+Environment=PULSE_LATENCY_MSEC=250
 Environment=TOKIO_WORKER_THREADS=2
 ExecStart=@BACKEND_BINARY@ --config-path=@CONFIG_FILE@
 Restart=on-failure

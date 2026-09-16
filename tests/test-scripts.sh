@@ -261,7 +261,7 @@ runtime_unit="$runtime_config/systemd/user/omaspotify.service"
 grep -qx 'device_name = "Test speakers"' "$runtime_spotify_config"
 grep -qx 'no_audio_cache = false' "$runtime_spotify_config"
 grep -qx 'max_cache_size = 1000000000' "$runtime_spotify_config"
-grep -qx 'Environment=PULSE_LATENCY_MSEC=30' "$runtime_unit"
+grep -qx 'Environment=PULSE_LATENCY_MSEC=250' "$runtime_unit"
 
 PATH="$mock_bin:$PATH" \
 XDG_CONFIG_HOME="$runtime_config" \
@@ -563,7 +563,7 @@ grep -qx 'max_cache_size = 1000000000' "$source_root/config/playback.conf"
 env -u XDG_CONFIG_HOME -u OMASPOTIFY_RUNTIME_DIR HOME="$test_root/home" \
   "$source_root/scripts/render-unit.sh" |
   grep -qxF -- "ExecStart=$test_root/home/.local/lib/omaspotify/omaspotify-backend --config-path=$test_root/home/.config/omaspotify/playback.conf"
-grep -qx 'Environment=PULSE_LATENCY_MSEC=30' \
+grep -qx 'Environment=PULSE_LATENCY_MSEC=250' \
   "$source_root/systemd/omaspotify.service"
 grep -qx 'Environment=TOKIO_WORKER_THREADS=2' \
   "$source_root/systemd/omaspotify.service"

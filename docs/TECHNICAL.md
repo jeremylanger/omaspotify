@@ -28,9 +28,13 @@ computer, or when you choose it in Devices. Once every player surface closes,
 it stops after the configured idle period; 0 keeps it available indefinitely.
 This backend is the only playback engine; there is no second daemon.
 
-The unit sets `PULSE_LATENCY_MSEC=30` only for local playback and caps
-librespot's private player runtime at two Tokio workers. The backend's own
-control runtime is single-threaded; keeping two player workers still allows
+The unit sets `PULSE_LATENCY_MSEC=250` only for local playback and caps
+librespot's private player runtime at two Tokio workers. That buffer is what
+stands between a stall anywhere in the decoder and a hole in the audio, and
+librespot drains it before it pauses, so the number is also how long a pause
+takes to go quiet. Measured on the sink monitor: 250 ms rides out a 140 ms
+stall and pauses in 142 ms. The backend's own control runtime is
+single-threaded; keeping two player workers still allows
 network fetching, preloading, and blocking decoder work to overlap. Quickshell
 interpolates MPRIS position locally, so the backend publishes one authoritative
 position update per second instead of four.

@@ -341,32 +341,37 @@ Lossless is out (see Verified facts). These are the wins that are actually avail
       re-pin onto upstream `dev` once it merges
 - [ ] Crossfade — parked. Not in librespot; would mean hand-writing audio pipeline code
 
-### Crackles and pops — first investigation
+### Crackles and pops — found and fixed
 
-Reported as audible during playback, and **also present on the native Spotify client,
-though less badly**. That points below our app. Measured on the dev machine:
+The output buffer was too small to survive an ordinary desktop hiccup. The unit
+asked for `PULSE_LATENCY_MSEC=30`, which upstream chose for track-change
+responsiveness, and that left about 25 ms between the decoder and the speakers.
 
-- Over 30 seconds of active playback the sink recorded **zero new xruns**, so it is
-  intermittent and was not reproducible during the pass
-- Error counts are cumulative since each client started, not current rates:
-  `voxtype` 1160 over 3 days (negligible), `wayvibes` 19 in 48 minutes (~1 per 2.5 min),
-  our backend 11, the sink 30
-- PipeWire is locked to 48 kHz (`clock.allowed-rates = [ 48000 ]`). **Spotify streams
-  44.1 kHz**, so every track we play is resampled. Our backend's stream shows as
-  `331/44100`
-- `wayvibes` holds an always-on ~6 ms real-time stream for keyboard sounds. It has the
-  highest xrun rate of anything on the machine and would affect the native client too,
-  which matches the report
-- Our unit asks for `PULSE_LATENCY_MSEC=30`. Upstream chose that for track-change
-  responsiveness; it is aggressive for music and is our only lever
+The first pass measured the wrong thing. `pw-top`'s ERR column counts xruns on
+the graph, not underruns in a PulseAudio stream, so it read zero through
+dropouts that were plainly audible. Freezing the backend with `SIGSTOP` and
+recording the sink monitor gives ground truth: a stall longer than the buffer
+comes out as a hole of exactly that length, minus the buffer.
 
-Next steps, cheapest first. Nothing changed yet — the fault was not reproducible, so a
-speculative fix could not be measured:
+Measured that way, on the sink monitor, for each buffer size:
 
-- [ ] A/B with `wayvibes` stopped, since it is the highest-xrun client and is always on
-- [ ] Add 44100 to PipeWire's `clock.allowed-rates` so Spotify audio is not resampled
-- [ ] Only then consider raising `PULSE_LATENCY_MSEC`, ideally as a setting rather than a
-      new hardcoded default, and measure xruns before and after
+| `PULSE_LATENCY_MSEC` | stall absorbed silently | pause delay |
+| --- | --- | --- |
+| 30 (was) | ~25 ms | 37 ms |
+| 150 | ~80 ms | 81 ms |
+| 250 (now) | ~140 ms | 142 ms |
+| 500 | over 300 ms | 292 ms |
+
+The two columns track each other because librespot drains the buffer before it
+pauses, so every millisecond of headroom is a millisecond of pause delay. 250 ms
+buys five times the headroom while a pause still lands inside the window where a
+button press feels immediate.
+
+- [x] Add 44100 to PipeWire's `clock.allowed-rates` so Spotify audio is not
+      resampled. Done outside the repo, in the user's PipeWire config
+- [x] Raise `PULSE_LATENCY_MSEC` and measure it, rather than guessing
+- [ ] Revisit if dropouts survive 250 ms; the next lever is a bigger buffer with
+      a flush instead of a drain on pause, which means patching librespot
 
 ## Phase F — UI/UX overhaul
 
