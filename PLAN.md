@@ -225,7 +225,7 @@ before tagging a release.
       into a fresh plugin id in place, so it serves nobody. It is a structural change in
       `engine.rs` (a function parameter and its call site), not a string swap, so it waits
       for a compiler
-- [ ] Cut a real `v2.0.0` tag so users get an attested binary instead of a local Rust build
+- [x] Cut a real `v2.0.0` tag so users get an attested binary instead of a local Rust build
 - [ ] README rewrite: positioning vs the original and vs MPRIS popups
 
 ## Phase D — Decomposition & test safety net — IN PROGRESS
