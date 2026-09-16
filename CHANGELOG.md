@@ -6,6 +6,23 @@ OmaSpotify is a fork of [Omarchy Spotify](https://github.com/stappmus/Omarchy-Sp
 Changes below start from the fork point. For the history of the original plugin, see
 [its changelog](https://github.com/stappmus/Omarchy-Spotify/blob/main/CHANGELOG.md).
 
+- Fixed the audio cutting out for a moment every so often. The output buffer
+  held only about 25 ms, so any brief stall in the decoder became an audible
+  hole; it now holds 250 ms, which rides out a 140 ms stall while a pause still
+  goes quiet in 142 ms.
+- The sidebar's Settings button is now a cog in the title row, the Playlists
+  button is gone because picking a playlist from the list below already opens
+  it, and Liked Songs shares its row with Create playlist.
+- The kind, sort order and view controls sit on one row. Kind and view are
+  icons that name themselves in their tooltip.
+- The compact grid icon was a bed and the list icon was a focus box. Both now
+  look like what they do.
+- Now playing lost its outer box and gained a close button, so there is a way
+  out of it besides the keyboard.
+- The footer's like and song-actions buttons were never drawn: the row decided
+  whether to show itself by reading whether its own buttons were showing, which
+  can only ever answer no. They show now, including while the now playing view
+  is open, where the rest of the track details step aside for them.
 - Show Spotify's own playlists, like On Repeat, in the library when a
   personal Spotify client ID is set.
 - Stopped erasing the saved library and listening history when the shell

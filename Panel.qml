@@ -976,7 +976,7 @@ Item {
     var items = primaryNavigationItems()
     for (var i = 0; i < items.length; i++)
       actions.push("nav-" + items[i].id)
-    actions.push("nav-library", "nav-playlists")
+    actions.push("nav-library")
     if (accountConnected && service && !service.playlistActionBusy)
       actions.push("nav-create")
     if (!compactWidth && service && service.sidebarPlaylists().length)
@@ -1001,9 +1001,9 @@ Item {
   function footerCursorActions() {
     if (currentTab === "login") return []
     var actions = []
+    if (service && service.currentTrackSaveAvailable) actions.push("like")
+    if (service && service.currentTrackItem) actions.push("context")
     if (!nowPlayingExpanded) {
-      if (service && service.currentTrackSaveAvailable) actions.push("like")
-      if (service && service.currentTrackItem) actions.push("context")
       if (service && service.currentArtistContextAvailable) actions.push("artist")
       if (service && service.currentAlbumContextAvailable) actions.push("album")
     }
@@ -2176,8 +2176,8 @@ Item {
     var mode = service ? service.libraryView : "list"
     if (mode === "compact-list") return "󰉹"
     if (mode === "grid") return "󰕰"
-    if (mode === "compact-grid") return "󰋣"
-    return "󰋲"
+    if (mode === "compact-grid") return "󰀻"
+    return "󰕲"
   }
 
   function libraryViewLabel() {
@@ -2767,7 +2767,8 @@ Item {
 
               Column {
                 visible: !root.compactWidth
-                width: Math.max(40, parent.width - Style.space(38))
+                width: Math.max(20, parent.width - Style.space(38)
+                  - brandSettingsButton.width - parent.spacing)
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 0
 
@@ -2780,6 +2781,25 @@ Item {
                   font.bold: true
                   elide: Text.ElideRight
                 }
+              }
+
+              Button {
+                id: brandSettingsButton
+                visible: !root.compactWidth
+                width: visible ? implicitWidth : 0
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "󰒓"
+                foreground: root.foreground
+                selected: root.currentTab === "setup"
+                horizontalPadding: Style.space(4)
+                focusable: false
+                hasCursor: root.cursorOn("sidebar", "nav-settings")
+                tooltipText: root.shortcutHint("Settings", "Ctrl+,")
+                onClicked: root.chooseTab("setup")
+                onHovered: function(on) {
+                  if (on) root.setPanelCursor("sidebar", "nav-settings")
+                }
+                KeyHint { region: "sidebar"; action: "nav-settings"; sequences: ["Ctrl+,"] }
               }
             }
 
@@ -2874,35 +2894,6 @@ Item {
               anchors.topMargin: Style.space(6)
               spacing: Style.space(2)
 
-              Button {
-                width: parent.width
-                text: root.compactWidth ? "" : "Liked Songs"
-                iconText: root.compactWidth ? "" : "󰋑"
-                foreground: root.foreground
-                selected: root.currentTab === "library"
-                leftAlign: !root.compactWidth
-                horizontalPadding: root.compactWidth
-                  ? 0 : Style.spacing.controlPaddingX
-                focusable: false
-                hasCursor: root.cursorOn("sidebar", "nav-library")
-                tooltipText: "Liked Songs"
-                onClicked: root.chooseTab("library")
-                onHovered: function(on) {
-                  if (on) root.setPanelCursor("sidebar", "nav-library")
-                }
-                KeyHint { region: "sidebar"; action: "nav-library" }
-                OpticalGlyph {
-                  anchors.fill: parent
-                  visible: root.compactWidth
-                  text: "󰋑"
-                  color: parent.selected
-                    ? Style.selectedStateColor(root.foreground, root.accent)
-                    : root.foreground
-                  fontFamily: root.fontFamily
-                  fontSize: Style.font.icon
-                }
-              }
-
               Grid {
                 width: parent.width
                 columns: root.compactWidth ? 1 : 2
@@ -2912,25 +2903,25 @@ Item {
                   width: root.compactWidth ? parent.width
                     : Math.max(20, parent.width - createPlaylistShortcut.width
                       - parent.spacing)
-                  text: root.compactWidth ? "" : "Playlists"
-                  iconText: root.compactWidth ? "" : "󱁐"
+                  text: root.compactWidth ? "" : "Liked Songs"
+                  iconText: root.compactWidth ? "" : "󰋑"
                   foreground: root.foreground
-                  selected: root.currentTab === "playlists"
+                  selected: root.currentTab === "library"
                   leftAlign: !root.compactWidth
                   horizontalPadding: root.compactWidth
                     ? 0 : Style.spacing.controlPaddingX
                   focusable: false
-                  hasCursor: root.cursorOn("sidebar", "nav-playlists")
-                  tooltipText: "Playlists"
-                  onClicked: root.chooseTab("playlists")
+                  hasCursor: root.cursorOn("sidebar", "nav-library")
+                  tooltipText: "Liked Songs"
+                  onClicked: root.chooseTab("library")
                   onHovered: function(on) {
-                    if (on) root.setPanelCursor("sidebar", "nav-playlists")
+                    if (on) root.setPanelCursor("sidebar", "nav-library")
                   }
-                  KeyHint { region: "sidebar"; action: "nav-playlists" }
+                  KeyHint { region: "sidebar"; action: "nav-library" }
                   OpticalGlyph {
                     anchors.fill: parent
                     visible: root.compactWidth
-                    text: "󱁐"
+                    text: "󰋑"
                     color: parent.selected
                       ? Style.selectedStateColor(root.foreground, root.accent)
                       : root.foreground
@@ -2961,8 +2952,10 @@ Item {
               }
             }
 
+            // Kind of thing, sort order and view, all on one row. The two
+            // icons say what they are; the sort order needs its words.
             Row {
-              id: libraryFilterRow
+              id: libraryControls
               visible: !root.compactWidth
               anchors.left: parent.left
               anchors.right: parent.right
@@ -2970,35 +2963,21 @@ Item {
               anchors.margins: Style.space(2)
               anchors.topMargin: Style.space(6)
               height: visible ? implicitHeight : 0
-
-              Button {
-                id: libraryFilterButton
-                width: parent.width
-                iconText: root.libraryFilterIcon()
-                text: root.libraryFilterLabel()
-                foreground: root.muted
-                leftAlign: true
-                focusable: false
-                tooltipText: "Show one kind of thing"
-                onClicked: root.cycleLibraryFilter()
-              }
-            }
-
-            Row {
-              id: libraryControls
-              visible: !root.compactWidth
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.top: libraryFilterRow.bottom
-              anchors.margins: Style.space(2)
-              anchors.topMargin: Style.space(3)
-              height: visible ? implicitHeight : 0
               spacing: Style.space(2)
 
               Button {
+                id: libraryFilterButton
+                iconText: root.libraryFilterIcon()
+                foreground: root.muted
+                focusable: false
+                tooltipText: "Showing · " + root.libraryFilterLabel()
+                onClicked: root.cycleLibraryFilter()
+              }
+
+              Button {
                 id: librarySortButton
-                width: Math.max(40, parent.width - libraryViewButton.width
-                  - parent.spacing)
+                width: Math.max(40, parent.width - libraryFilterButton.width
+                  - libraryViewButton.width - parent.spacing * 2)
                 text: root.librarySortLabel()
                 iconText: "󰒺"
                 foreground: root.muted
@@ -3135,8 +3114,12 @@ Item {
               }
             }
 
+            // The cog lives in the title row, so this only covers the narrow
+            // and short layouts where that row is gone.
             Button {
               id: setupNavButton
+              visible: !brandSettingsButton.visible
+              height: visible ? implicitHeight : 0
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.bottom: parent.bottom
@@ -3520,16 +3503,18 @@ Item {
 
             Item {
               id: nowPlaying
-              visible: !root.nowPlayingExpanded
-              width: !visible ? 0 : root.extraNarrowWidth
+              readonly property bool actionsOnly: root.nowPlayingExpanded
+              width: actionsOnly
+                ? (nowPlayingActions.visible ? nowPlayingActions.width : 0)
+                : root.extraNarrowWidth
                 ? Math.max(Style.space(80), playerRow.width - transport.width
                   - playerRow.spacing)
                 : Math.max(Style.space(170), Math.min(Style.space(240),
                   playerRow.width * 0.29))
               height: parent.height
               readonly property real metadataSpacing: Style.space(9)
-              readonly property bool artworkVisible: !root.service
-                || root.service.artworkEnabled
+              readonly property bool artworkVisible: !actionsOnly
+                && (!root.service || root.service.artworkEnabled)
 
               BorderSurface {
                 id: nowPlayingArtwork
@@ -3588,6 +3573,7 @@ Item {
                   spacing: Style.space(3)
 
                   Text {
+                    visible: !nowPlaying.actionsOnly
                     width: Math.max(20, parent.width
                       - (nowPlayingActions.visible
                         ? nowPlayingActions.width + parent.spacing : 0))
@@ -3606,9 +3592,8 @@ Item {
 
                   Row {
                     id: nowPlayingActions
-                    visible: !root.extraNarrowWidth && (currentTrackLikeButton.visible
-                      || currentTrackMoreButton.visible
-                    )
+                    visible: (!root.extraNarrowWidth || nowPlaying.actionsOnly)
+                      && root.service && !!root.service.currentTrackItem
                     spacing: Style.space(1)
                     anchors.verticalCenter: parent.verticalCenter
 
@@ -3667,6 +3652,7 @@ Item {
                   id: currentArtistCursor
                   z: 2
                   clip: false
+                  visible: !nowPlaying.actionsOnly
                   width: parent.width
                   height: currentArtistLinks.implicitHeight
                   hasCursor: root.cursorOn("footer", "artist")
@@ -3719,7 +3705,8 @@ Item {
                   clip: false
                   width: parent.width
                   height: currentAlbumLinks.implicitHeight
-                  visible: root.service && root.service.currentAlbumContextAvailable
+                  visible: !nowPlaying.actionsOnly && root.service
+                    && root.service.currentAlbumContextAvailable
                   hasCursor: root.cursorOn("footer", "album")
                   foreground: root.foreground
                   HoverHandler {
