@@ -1168,9 +1168,11 @@ Item {
 
   function isLocalEngine(player) {
     if (!player) return false
-    var identity = [player.dbusName, player.desktopEntry, player.identity]
-      .join(" ").toLowerCase()
-    return identity.indexOf("librespot") !== -1
+    // Other librespot clients can coexist with this plugin. Only our own
+    // backend may satisfy local readiness or receive local MPRIS controls.
+    return String(player.desktopEntry || "").toLowerCase() === "omaspotify"
+      || /^org\.mpris\.MediaPlayer2\.OmaSpotify(?:\.|$)/i.test(
+        String(player.dbusName || ""))
   }
 
   function localEnginePlayer() {
