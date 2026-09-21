@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.1
 
 - Fixed Play doing nothing after the player had sat paused for a while.
   Spotify drops the connection now and then, and a paused player did not

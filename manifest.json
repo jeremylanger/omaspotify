@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.jeremylanger.omaspotify",
   "name": "OmaSpotify",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "jeremylanger",
   "license": "MIT",
   "description": "Spotify in Quickshell with all the features you need\u2014using about 60 MB of memory versus roughly 950 MB for the official client.",
