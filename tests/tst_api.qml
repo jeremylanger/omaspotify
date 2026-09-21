@@ -6,6 +6,18 @@ import "../Api.js" as Api
 TestCase {
   name: "SpotifyApiLogic"
 
+  function test_isCursorNavigationKey_coversMovingAndActivatingOnly() {
+    verify(Api.isCursorNavigationKey(Qt.Key_Tab, false, ""))
+    verify(Api.isCursorNavigationKey(Qt.Key_Backtab, false, ""))
+    verify(Api.isCursorNavigationKey(Qt.Key_Return, true, ""))
+    verify(Api.isCursorNavigationKey(Qt.Key_Left, true, ""))
+    verify(Api.isCursorNavigationKey(Qt.Key_End, true, ""))
+    verify(Api.isCursorNavigationKey(Qt.Key_J, true, "j"))
+    verify(!Api.isCursorNavigationKey(Qt.Key_Left, false, ""))
+    verify(!Api.isCursorNavigationKey(Qt.Key_Space, true, " "))
+    verify(!Api.isCursorNavigationKey(Qt.Key_M, true, "m"))
+  }
+
   function test_queryString_isStableAndEncoded() {
     compare(Api.queryString({ z: "last", q: "AC/DC & friends", empty: "" }),
       "q=AC%2FDC%20%26%20friends&z=last")

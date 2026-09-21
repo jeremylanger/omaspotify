@@ -37,7 +37,7 @@ Item {
           foreground: page.panel.foreground
           selected: page.panel.homeType === modelData.type
           focusable: false
-          hasCursor: page.panel.cursorOn("page", "home-" + modelData.type)
+          hasCursor: page.panel.cursorShown("page", "home-" + modelData.type)
           onClicked: page.panel.homeType = modelData.type
           onHovered: function(on) {
             if (on) page.panel.setPanelCursor("page", "home-" + modelData.type)

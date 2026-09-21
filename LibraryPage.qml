@@ -41,7 +41,7 @@ Item {
           foreground: page.panel.foreground
           selected: page.panel.libraryType === modelData.type
           focusable: false
-          hasCursor: page.panel.cursorOn("page", "library-" + modelData.type)
+          hasCursor: page.panel.cursorShown("page", "library-" + modelData.type)
           onClicked: {
             page.panel.libraryType = modelData.type
             if (page.panel.service) page.panel.service.loadLibrary(modelData.type, false)

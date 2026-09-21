@@ -25,7 +25,7 @@ Popup {
     width: parent ? parent.width : implicitWidth
     foreground: popup.panel.foreground
     leftAlign: true
-    hasCursor: popup.panel.cursorOn("popup", contextAction)
+    hasCursor: popup.panel.cursorShown("popup", contextAction)
     focusable: false
     onHovered: function(on) {
       if (on && contextAction) popup.panel.setPanelCursor("popup", contextAction)

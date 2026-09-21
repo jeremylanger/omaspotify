@@ -82,7 +82,7 @@ Item {
           selected: true
           enabled: !playlistItemsCollection.playbackUsesVisibleOrder
             || playlistItemsCollection.visibleItems.length > 0
-          hasCursor: page.panel.cursorOn("page", "playlist-play")
+          hasCursor: page.panel.cursorShown("page", "playlist-play")
           tooltipText: playlistItemsCollection.playbackUsesVisibleOrder
             ? Api.visibleOrderPlaybackMessage(
               playlistItemsCollection.visibleItems.length)
@@ -100,7 +100,7 @@ Item {
           iconText: "󰇙"
           foreground: page.panel.foreground
           tooltipText: page.panel.shortcutHint("More actions", "C")
-          hasCursor: page.panel.cursorOn("page", "playlist-more")
+          hasCursor: page.panel.cursorShown("page", "playlist-more")
           onHovered: function(on) {
             if (on) page.panel.setPanelCursor("page", "playlist-more")
           }

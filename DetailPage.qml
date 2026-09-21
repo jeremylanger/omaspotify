@@ -177,7 +177,7 @@ Item {
             foreground: page.panel.foreground
             selected: true
             focusable: false
-            hasCursor: page.panel.cursorOn("page", "detail-play")
+            hasCursor: page.panel.cursorShown("page", "detail-play")
             enabled: page.panel.service && page.panel.service.detailItem
               && (["show", "audiobook"].indexOf(page.panel.service.detailItem.type) < 0
                 || page.panel.service.detailItems.length > 0)
@@ -200,7 +200,7 @@ Item {
             foreground: Color.urgent
             accent: Color.urgent
             focusable: false
-            hasCursor: page.panel.cursorOn("page", "detail-save")
+            hasCursor: page.panel.cursorShown("page", "detail-save")
             enabled: page.panel.service && page.panel.service.detailItem
               && !page.panel.service.isSaved(page.panel.service.detailItem)
             onClicked: if (page.panel.service && !page.panel.service.isSaved(page.panel.service.detailItem))
@@ -217,7 +217,7 @@ Item {
             foreground: page.panel.foreground
             tooltipText: page.panel.shortcutHint("More actions", "C")
             focusable: false
-            hasCursor: page.panel.cursorOn("page", "detail-more")
+            hasCursor: page.panel.cursorShown("page", "detail-more")
             onHovered: function(on) {
               if (on) page.panel.setPanelCursor("page", "detail-more")
             }

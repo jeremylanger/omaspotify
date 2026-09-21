@@ -46,7 +46,7 @@ Item {
           selected: page.panel.searchType === modelData.type
           focusable: false
           horizontalPadding: Style.space(7)
-          hasCursor: page.panel.cursorOn("page", "search-" + modelData.type)
+          hasCursor: page.panel.cursorShown("page", "search-" + modelData.type)
           onClicked: page.panel.searchType = modelData.type
           onHovered: function(on) {
             if (on) page.panel.setPanelCursor("page", "search-" + modelData.type)

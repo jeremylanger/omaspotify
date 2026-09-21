@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Hovering a button no longer leaves its highlight behind once the pointer
+  moves on, and the volume and seek bars no longer light up on hover. Arrow
+  keys and Tab still show where the keyboard is; the first key after using
+  the mouse just shows it.
+
 ## 2.0.0
 
 OmaSpotify is a fork of [Omarchy Spotify](https://github.com/stappmus/Omarchy-Spotify).

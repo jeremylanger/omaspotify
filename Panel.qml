@@ -72,6 +72,8 @@ Item {
   property bool shortcutModeLatched: false
   property int heldModifierFlags: 0
   property bool panelCursorActive: false
+  // Hover moves the cursor without drawing it, so a highlight never lingers.
+  property bool panelCursorFromPointer: false
   property string panelCursorRegion: "footer"
   property string panelCursorAction: "play"
   property string popupReturnRegion: "page"
@@ -729,6 +731,15 @@ Item {
       && panelCursorAction === action
   }
 
+  function cursorShown(region, action) {
+    return !panelCursorFromPointer && cursorOn(region, action)
+  }
+
+  function showKeyboardCursor() {
+    panelCursorActive = true
+    panelCursorFromPointer = false
+  }
+
   function cursorActionsByRegion() {
     return {
       sidebar: sidebarCursorActions(),
@@ -812,7 +823,7 @@ Item {
   function applyCursorDestination(dest) {
     if (!dest || !dest.region) return
     latchShortcutMode()
-    panelCursorActive = true
+    showKeyboardCursor()
     var fromRegion = panelCursorRegion
     var fromAction = panelCursorAction
     panelCursorRegion = dest.region
@@ -1102,6 +1113,7 @@ Item {
 
   function setPanelCursor(region, action) {
     panelCursorActive = true
+    panelCursorFromPointer = true
     panelCursorRegion = region
     panelCursorAction = action
     ensurePanelCursor(region)
@@ -1110,7 +1122,7 @@ Item {
 
   function movePanelCursorRegion(delta) {
     latchShortcutMode()
-    panelCursorActive = true
+    showKeyboardCursor()
     var regions = panelCursorRegions()
     panelCursorRegion = Api.moveCursorAction(regions, panelCursorRegion, delta)
     ensurePanelCursor(panelCursorRegion)
@@ -1155,7 +1167,7 @@ Item {
 
   function movePanelCursor(delta) {
     latchShortcutMode()
-    panelCursorActive = true
+    showKeyboardCursor()
     ensurePanelCursor()
     var from = panelCursorAction
     var to = Api.moveCursorAction(
@@ -1236,7 +1248,7 @@ Item {
 
   function activatePanelCursor() {
     latchShortcutMode()
-    panelCursorActive = true
+    showKeyboardCursor()
     ensurePanelCursor()
     var action = panelCursorAction
     if (action === "nav-home") chooseTab("home")
@@ -1461,7 +1473,7 @@ Item {
   function moveContextMenuCursor(delta) {
     if (!mediaContextMenu.opened || !delta) return false
     latchShortcutMode()
-    panelCursorActive = true
+    showKeyboardCursor()
     panelCursorRegion = "popup"
     panelCursorAction = Api.moveCursorAction(contextMenuCursorActions(),
       panelCursorAction, delta)
@@ -1478,7 +1490,7 @@ Item {
     var move = contextMenuMoveDelta(event)
     if (tabbing) {
       latchShortcutMode()
-      panelCursorActive = true
+      showKeyboardCursor()
       panelCursorRegion = "popup"
       panelCursorAction = Api.moveCursorAction(contextMenuCursorActions(),
         panelCursorAction, (shift || key === Qt.Key_Backtab) ? -1 : 1)
@@ -1493,7 +1505,7 @@ Item {
     }
     if (key === Qt.Key_Home || key === Qt.Key_End) {
       latchShortcutMode()
-      panelCursorActive = true
+      showKeyboardCursor()
       panelCursorRegion = "popup"
       var actions = contextMenuCursorActions()
       if (actions.length) {
@@ -1550,7 +1562,7 @@ Item {
           || text === "j" || text === "k" || key === Qt.Key_Left
           || key === Qt.Key_Right || text === "h" || text === "l") {
         latchShortcutMode()
-        panelCursorActive = true
+        showKeyboardCursor()
         panelCursorRegion = "popup"
         var sleepDelta = (key === Qt.Key_Up
           || text === "k" || key === Qt.Key_Left || text === "h") ? -1 : 1
@@ -1569,7 +1581,7 @@ Item {
     if (tabbing) {
       latchShortcutMode()
       if (!panelCursorActive) {
-        panelCursorActive = true
+        showKeyboardCursor()
         ensurePanelCursor("footer")
         syncCursorFocus()
         return true
@@ -1591,8 +1603,11 @@ Item {
         || key === Qt.Key_Up || key === Qt.Key_Down || key === Qt.Key_Left
         || key === Qt.Key_Right)) {
       latchShortcutMode()
-      panelCursorActive = true
+      var leftByPointer = panelCursorActive && panelCursorFromPointer
+      showKeyboardCursor()
       ensurePanelCursor()
+      // The first key only shows a cursor the pointer left behind.
+      if (leftByPointer) return true
       if (!ctrl && !alt && (panelCursorAction === "seek"
           || panelCursorAction === "volume") && horizontal) {
         if (panelCursorAction === "seek") seekBy(delta * 5)
@@ -1612,7 +1627,8 @@ Item {
     }
 
     if (panelCursorActive && (key === Qt.Key_Return || key === Qt.Key_Enter)) {
-      activatePanelCursor()
+      if (panelCursorFromPointer) showKeyboardCursor()
+      else activatePanelCursor()
       return true
     }
     if (menuKey && openCurrentContextMenu()) {
@@ -1621,6 +1637,7 @@ Item {
     }
     if (panelCursorActive && !ctrl && !alt && !shift
         && (key === Qt.Key_Home || key === Qt.Key_End)) {
+      showKeyboardCursor()
       var actions = regionCursorActions(panelCursorRegion)
       if (actions.length) {
         panelCursorAction = key === Qt.Key_Home
@@ -1926,7 +1943,7 @@ Item {
     opened = true
     if (payload.shortcutLatch) {
       latchShortcutMode()
-      panelCursorActive = true
+      showKeyboardCursor()
       ensurePanelCursor("footer")
     } else clearShortcutMode()
     syncDraftSettings()
@@ -2791,7 +2808,7 @@ Item {
                 selected: root.currentTab === "setup"
                 horizontalPadding: Style.space(4)
                 focusable: false
-                hasCursor: root.cursorOn("sidebar", "nav-settings")
+                hasCursor: root.cursorShown("sidebar", "nav-settings")
                 tooltipText: root.shortcutHint("Settings", "Ctrl+,")
                 onClicked: root.chooseTab("setup")
                 onHovered: function(on) {
@@ -2831,7 +2848,7 @@ Item {
                   horizontalPadding: root.compactWidth
                     ? 0 : Style.spacing.controlPaddingX
                   focusable: false
-                  hasCursor: root.cursorOn("sidebar", "nav-" + modelData.id)
+                  hasCursor: root.cursorShown("sidebar", "nav-" + modelData.id)
                   tooltipText: radioEntry && root.service && root.service.lastRadioPlaylist
                     ? modelData.label + " · " + root.service.lastRadioPlaylist.name
                     : root.shortcutHint(modelData.label,
@@ -2909,7 +2926,7 @@ Item {
                   horizontalPadding: root.compactWidth
                     ? 0 : Style.spacing.controlPaddingX
                   focusable: false
-                  hasCursor: root.cursorOn("sidebar", "nav-library")
+                  hasCursor: root.cursorShown("sidebar", "nav-library")
                   tooltipText: "Liked Songs"
                   onClicked: root.chooseTab("library")
                   onHovered: function(on) {
@@ -2937,7 +2954,7 @@ Item {
                   fontSize: Style.font.subtitle
                   horizontalPadding: Style.space(7)
                   focusable: false
-                  hasCursor: root.cursorOn("sidebar", "nav-create")
+                  hasCursor: root.cursorShown("sidebar", "nav-create")
                   tooltipText: "Create a new playlist"
                   enabled: root.accountConnected && root.service
                     && !root.service.playlistActionBusy
@@ -3082,7 +3099,7 @@ Item {
                 accent: root.accent
                 muted: root.muted
                 fontFamily: root.fontFamily
-                hasCursor: root.cursorOn("sidebar", "sidebar-playlists")
+                hasCursor: root.cursorShown("sidebar", "sidebar-playlists")
                   && ListView.isCurrentItem
                 selected: root.currentTab === "playlists" && root.service
                   && root.service.selectedPlaylist
@@ -3129,7 +3146,7 @@ Item {
               selected: root.currentTab === "setup"
               leftAlign: !root.compactWidth
               focusable: false
-              hasCursor: root.cursorOn("sidebar", "nav-settings")
+              hasCursor: root.cursorShown("sidebar", "nav-settings")
               tooltipText: root.shortcutHint("Settings", "Ctrl+,")
               KeyHint { region: "sidebar"; action: "nav-settings"; sequences: ["Ctrl+,"] }
               onClicked: root.chooseTab("setup")
@@ -3211,7 +3228,7 @@ Item {
                 foreground: root.foreground
                 tooltipText: root.shortcutHint("Back", "Alt+Left")
                 focusable: false
-                hasCursor: root.cursorOn("header", "back")
+                hasCursor: root.cursorShown("header", "back")
                 onClicked: root.goBack()
                 onHovered: function(on) { if (on) root.setPanelCursor("header", "back") }
                 KeyHint { region: "header"; action: "back"; sequences: ["Alt+Left"] }
@@ -3261,7 +3278,7 @@ Item {
                 fontSize: Style.font.subtitle
                 tooltipText: root.shortcutHint("Keyboard shortcuts", "Ctrl+/")
                 focusable: false
-                hasCursor: root.cursorOn("header", "help")
+                hasCursor: root.cursorShown("header", "help")
                 onClicked: root.toggleShortcutHelp()
                 onHovered: function(on) { if (on) root.setPanelCursor("header", "help") }
                 KeyHint { region: "header"; action: "help"; sequences: ["Ctrl+/"] }
@@ -3275,7 +3292,7 @@ Item {
                 foreground: root.foreground
                 tooltipText: "Refresh"
                 focusable: false
-                hasCursor: root.cursorOn("header", "refresh")
+                hasCursor: root.cursorShown("header", "refresh")
                 onHovered: function(on) {
                   if (on) root.setPanelCursor("header", "refresh")
                 }
@@ -3308,7 +3325,7 @@ Item {
                   ? "Press Esc again to close"
                   : root.shortcutHint("Close", "Esc, Esc")
                 focusable: false
-                hasCursor: root.cursorOn("header", "close")
+                hasCursor: root.cursorShown("header", "close")
                 onClicked: root.requestClose()
                 onHovered: function(on) { if (on) root.setPanelCursor("header", "close") }
                 KeyHint { region: "header"; action: "close"; sequences: ["Esc"] }
@@ -3365,7 +3382,7 @@ Item {
                 placeholderText: root.activeSearchScope.available && root.searchInContext
                   ? "Search in " + root.activeSearchScope.label : "Search Spotify"
                 enabled: root.service && root.service.auth.loggedIn
-                hasCursor: root.cursorOn("header", "search")
+                hasCursor: root.cursorShown("header", "search")
                 onTextEdited: root.editUnifiedSearch(text)
                 onAccepted: root.runUnifiedSearch()
 
@@ -3425,7 +3442,7 @@ Item {
                 selected: root.searchInContext
                 bordered: true
                 focusable: false
-                hasCursor: root.cursorOn("header", "scope")
+                hasCursor: root.cursorShown("header", "scope")
                 onHovered: function(on) {
                   if (on) root.setPanelCursor("header", "scope")
                 }
@@ -3613,7 +3630,7 @@ Item {
                           ? "Updating liked status…"
                           : (root.service && root.service.currentTrackSaved
                             ? "Remove like" : "Like this song"))
-                      hasCursor: root.cursorOn("footer", "like")
+                      hasCursor: root.cursorShown("footer", "like")
                       onClicked: if (root.service)
                         root.service.toggleCurrentTrackSaved()
                       onHovered: function(on) {
@@ -3632,7 +3649,7 @@ Item {
                       horizontalPadding: Style.space(4)
                       verticalPadding: Style.space(2)
                       tooltipText: root.shortcutHint("Song actions", "C")
-                      hasCursor: root.cursorOn("footer", "context")
+                      hasCursor: root.cursorShown("footer", "context")
                       onClicked: root.openNowPlayingContext()
                       onHovered: function(on) {
                         if (on) root.setPanelCursor("footer", "context")
@@ -3653,7 +3670,8 @@ Item {
                   visible: !nowPlaying.actionsOnly
                   width: parent.width
                   height: currentArtistLinks.implicitHeight
-                  hasCursor: root.cursorOn("footer", "artist")
+                  hasCursor: root.cursorShown("footer", "artist")
+                    || currentArtistHover.hovered
                   foreground: root.foreground
                   HoverHandler {
                     id: currentArtistHover
@@ -3705,7 +3723,8 @@ Item {
                   height: currentAlbumLinks.implicitHeight
                   visible: !nowPlaying.actionsOnly && root.service
                     && root.service.currentAlbumContextAvailable
-                  hasCursor: root.cursorOn("footer", "album")
+                  hasCursor: root.cursorShown("footer", "album")
+                    || currentAlbumHover.hovered
                   foreground: root.foreground
                   HoverHandler {
                     id: currentAlbumHover
@@ -3770,7 +3789,7 @@ Item {
                   glyphText: "󰒟"
                   foreground: root.foreground
                   selected: root.service && root.service.shuffle
-                  hasCursor: root.cursorOn("footer", "shuffle")
+                  hasCursor: root.cursorShown("footer", "shuffle")
                   tooltipText: root.shortcutHint("Shuffle", "Ctrl+S")
                   enabled: root.service && root.service.playbackControllable
                   onClicked: if (root.service) root.service.setShuffle(!root.service.shuffle)
@@ -3783,7 +3802,7 @@ Item {
                   glyphText: "󰒮"
                   visible: !root.spokenWordPlaying
                   foreground: root.foreground
-                  hasCursor: root.cursorOn("footer", "previous")
+                  hasCursor: root.cursorShown("footer", "previous")
                   tooltipText: root.shortcutHint("Previous", "Ctrl+Left")
                   enabled: root.service && root.service.playbackControllable
                   onClicked: if (root.service) root.service.previous()
@@ -3796,7 +3815,7 @@ Item {
                   glyphText: "󰵛"
                   visible: root.spokenWordPlaying
                   foreground: root.foreground
-                  hasCursor: root.cursorOn("footer", "back15")
+                  hasCursor: root.cursorShown("footer", "back15")
                   tooltipText: "Back 15 seconds"
                   enabled: root.service && root.service.playbackControllable
                   onClicked: if (root.service) root.service.skipBySeconds(-15)
@@ -3809,7 +3828,7 @@ Item {
                   glyphSize: Style.font.iconLarge
                   foreground: root.foreground
                   selected: root.service && root.service.playing
-                  hasCursor: root.cursorOn("footer", "play")
+                  hasCursor: root.cursorShown("footer", "play")
                   tooltipText: root.shortcutHint(
                     root.service && root.service.playing ? "Pause"
                       : (root.service && root.service.canResumeLastPlayed
@@ -3825,7 +3844,7 @@ Item {
                   glyphText: "󰵙"
                   visible: root.spokenWordPlaying
                   foreground: root.foreground
-                  hasCursor: root.cursorOn("footer", "forward30")
+                  hasCursor: root.cursorShown("footer", "forward30")
                   tooltipText: "Forward 30 seconds"
                   enabled: root.service && root.service.playbackControllable
                   onClicked: if (root.service) root.service.skipBySeconds(30)
@@ -3837,7 +3856,7 @@ Item {
                   glyphText: "󰒭"
                   visible: !root.spokenWordPlaying
                   foreground: root.foreground
-                  hasCursor: root.cursorOn("footer", "next")
+                  hasCursor: root.cursorShown("footer", "next")
                   tooltipText: root.shortcutHint("Next", "Ctrl+Right")
                   enabled: root.service && root.service.playbackControllable
                   onClicked: if (root.service) root.service.next()
@@ -3851,7 +3870,7 @@ Item {
                   glyphText: root.service && root.service.repeatMode === "track" ? "󰑘" : "󰑖"
                   foreground: root.foreground
                   selected: root.service && root.service.repeatMode !== "off"
-                  hasCursor: root.cursorOn("footer", "repeat")
+                  hasCursor: root.cursorShown("footer", "repeat")
                   tooltipText: root.shortcutHint("Repeat: "
                     + Api.repeatModeLabel(root.service
                       ? root.service.repeatMode : "off"), "Ctrl+R")
@@ -3866,7 +3885,7 @@ Item {
                   visible: !root.extraNarrowWidth
                   glyphText: "󰎈"
                   foreground: root.foreground
-                  hasCursor: root.cursorOn("footer", "lyrics")
+                  hasCursor: root.cursorShown("footer", "lyrics")
                   tooltipText: root.shortcutHint("Open lyrics in Omasing",
                     "Ctrl+Shift+L")
                   enabled: root.service && root.service.lyricsAvailable
@@ -3880,7 +3899,7 @@ Item {
                   glyphText: root.nowPlayingExpanded ? "󰊔" : "󰊓"
                   foreground: root.foreground
                   selected: root.nowPlayingExpanded
-                  hasCursor: root.cursorOn("footer", "expand")
+                  hasCursor: root.cursorShown("footer", "expand")
                   tooltipText: root.shortcutHint(root.nowPlayingExpanded
                     ? "Back to browsing" : "Now playing view", "E")
                   onClicked: root.toggleNowPlayingExpanded()
@@ -3910,7 +3929,7 @@ Item {
                     - durationFooterTime.implicitWidth - Style.space(12))
                   height: positionSlider.implicitHeight
                   anchors.verticalCenter: parent.verticalCenter
-                  hasCursor: root.cursorOn("footer", "seek")
+                  hasCursor: root.cursorShown("footer", "seek")
                   foreground: root.foreground
                   HoverHandler {
                     onHoveredChanged: if (hovered) root.setPanelCursor("footer", "seek")
@@ -3974,7 +3993,7 @@ Item {
                 Button {
                   iconText: "󰋋"
                   foreground: root.foreground
-                  hasCursor: root.cursorOn("footer", "devices")
+                  hasCursor: root.cursorShown("footer", "devices")
                   tooltipText: root.shortcutHint("Devices", "Alt+Shift+D")
                   onClicked: root.chooseTab("devices")
                   onHovered: function(on) {
@@ -3987,7 +4006,7 @@ Item {
                   iconText: "󰔛"
                   foreground: root.foreground
                   selected: root.service && root.service.sleepActive
-                  hasCursor: root.cursorOn("footer", "sleep")
+                  hasCursor: root.cursorShown("footer", "sleep")
                   tooltipText: root.service ? root.service.sleepStatusText() : "Sleep timer"
                   onClicked: sleepPopup.open()
                   onHovered: function(on) {
@@ -4000,7 +4019,7 @@ Item {
                   width: Math.max(35, parent.width - Style.space(74))
                   height: volumeSlider.implicitHeight
                   anchors.verticalCenter: parent.verticalCenter
-                  hasCursor: root.cursorOn("footer", "volume")
+                  hasCursor: root.cursorShown("footer", "volume")
                   foreground: root.foreground
                   HoverHandler {
                     onHoveredChanged: if (hovered) root.setPanelCursor("footer", "volume")

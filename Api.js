@@ -1252,6 +1252,16 @@ function shortcutModifierFlagsAfterEvent(reportedFlags, pressed, previousFlags,
   return pressed === true ? reported : previous
 }
 
+// Keys that move the keyboard cursor or press what it is on.
+function isCursorNavigationKey(key, plain, text) {
+  return key === Qt.Key_Tab || key === Qt.Key_Backtab
+    || key === Qt.Key_Return || key === Qt.Key_Enter
+    || (plain && (key === Qt.Key_Left || key === Qt.Key_Right
+      || key === Qt.Key_Up || key === Qt.Key_Down
+      || key === Qt.Key_Home || key === Qt.Key_End
+      || ["h", "j", "k", "l"].indexOf(text) >= 0))
+}
+
 function shortcutKeycap(sequence) {
   var key = String(parseShortcutSequence(sequence).key || "")
   var lower = key.toLowerCase()

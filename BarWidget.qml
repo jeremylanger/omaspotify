@@ -34,6 +34,8 @@ BarWidget {
   property bool miniShortcutHelpVisible: false
   property bool popoutSwitchClosing: false
   property bool miniCursorActive: false
+  // Hover moves the cursor without drawing it, so a highlight never lingers.
+  property bool miniCursorFromPointer: false
   property string miniCursor: "play"
   property real volumeBeforeMute: 0.5
   property bool shortcutModeLatched: false
@@ -296,7 +298,7 @@ BarWidget {
   function toggleMiniShortcutHelp() {
     if (lyricsInstallPromptVisible) return
     miniShortcutHelpVisible = !miniShortcutHelpVisible
-    if (miniShortcutHelpVisible) setMiniCursor("help-close")
+    if (miniShortcutHelpVisible) setMiniCursor("help-close", true)
     else ensureMiniCursor()
   }
 
@@ -310,11 +312,17 @@ BarWidget {
     miniCursor = actions.indexOf("play") >= 0 ? "play" : actions[0]
   }
 
-  function setMiniCursor(action) {
+  function setMiniCursor(action, fromKeyboard) {
     if (miniKeyboardActions.indexOf(action) < 0) return
     miniCursor = action
     miniCursorActive = true
+    miniCursorFromPointer = fromKeyboard !== true
   }
+
+  function miniCursorOn(action) {
+    return miniCursorActive && !miniCursorFromPointer && miniCursor === action
+  }
+
 
   function moveMiniCursor(delta) {
     var actions = miniKeyboardActions
@@ -325,6 +333,7 @@ BarWidget {
     index = (index + (delta < 0 ? -1 : 1) + actions.length) % actions.length
     miniCursor = actions[index]
     miniCursorActive = true
+    miniCursorFromPointer = false
   }
 
   function seekBy(seconds) {
@@ -460,6 +469,10 @@ BarWidget {
       if (!event.isAutoRepeat) toggleMute()
     } else if (plain && event.key === Qt.Key_O) {
       if (!event.isAutoRepeat) openFullPanel()
+    } else if (miniCursorFromPointer
+        && Api.isCursorNavigationKey(event.key, plain, text)) {
+      // The first key only shows a cursor the pointer left behind.
+      miniCursorFromPointer = false
     } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
       moveMiniCursor(shift || event.key === Qt.Key_Backtab ? -1 : 1)
     } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -477,9 +490,9 @@ BarWidget {
     } else if (plain && (event.key === Qt.Key_Down || text === "j")) {
       moveMiniCursor(1)
     } else if (plain && event.key === Qt.Key_Home) {
-      setMiniCursor(miniKeyboardActions[0])
+      setMiniCursor(miniKeyboardActions[0], true)
     } else if (plain && event.key === Qt.Key_End) {
-      setMiniCursor(miniKeyboardActions[miniKeyboardActions.length - 1])
+      setMiniCursor(miniKeyboardActions[miniKeyboardActions.length - 1], true)
     } else return
     root.acceptMiniKey(event)
   }
@@ -503,6 +516,7 @@ BarWidget {
     if (lyricsInstallPromptVisible) {
       miniCursor = "prompt-cancel"
       miniCursorActive = true
+      miniCursorFromPointer = false
     } else ensureMiniCursor()
   }
   onPopupOpenChanged: {
@@ -510,6 +524,7 @@ BarWidget {
       miniCursor = miniKeyboardActions.indexOf("play") >= 0
         ? "play" : miniKeyboardActions[0]
       miniCursorActive = miniKeyboardActions.length > 0
+      miniCursorFromPointer = !pendingShortcutLatch
       if (pendingShortcutLatch) latchShortcutMode()
       pendingShortcutLatch = false
     } else {
@@ -741,13 +756,13 @@ BarWidget {
           foreground: root.foreground
           visible: root.spotify && root.spotify.daemon.running
           enabled: root.spotify && !root.spotify.daemon.busy
-          hasCursor: root.miniCursorActive && root.miniCursor === "stop"
+          hasCursor: root.miniCursorOn("stop")
           onClicked: root.activateMiniAction("stop")
         }
         Button {
           text: "Open full player"
           foreground: root.foreground
-          hasCursor: root.miniCursorActive && root.miniCursor === "open"
+          hasCursor: root.miniCursorOn("open")
           onClicked: root.openFullPanel()
         }
       }
@@ -826,7 +841,7 @@ BarWidget {
               ? "Working…" : "Set up and continue"
             iconText: "󰍂"
             foreground: root.foreground
-            hasCursor: root.miniCursorActive && root.miniCursor === "setup"
+            hasCursor: root.miniCursorOn("setup")
             enabled: root.spotify && !root.spotify.loginBusy
             onClicked: if (root.spotify) root.spotify.login()
             onHovered: function(on) { if (on) root.setMiniCursor("setup") }
@@ -836,7 +851,7 @@ BarWidget {
             text: "Cancel"
             foreground: root.foreground
             visible: root.spotify && root.spotify.loginBusy
-            hasCursor: root.miniCursorActive && root.miniCursor === "setup-cancel"
+            hasCursor: root.miniCursorOn("setup-cancel")
             onClicked: if (root.spotify) root.spotify.cancelLogin()
             onHovered: function(on) { if (on) root.setMiniCursor("setup-cancel") }
           }
@@ -1017,7 +1032,7 @@ BarWidget {
               iconSize: Style.font.body
               foreground: Color.urgent
               accent: Color.urgent
-              hasCursor: root.miniCursorActive && root.miniCursor === "like"
+              hasCursor: root.miniCursorOn("like")
               enabled: root.spotify && root.spotify.currentTrackSaveAvailable
               horizontalPadding: Style.space(4)
               verticalPadding: Style.space(2)
@@ -1044,7 +1059,7 @@ BarWidget {
             visible: miniArtistLinks.fallbackText !== ""
               || miniArtistLinks.artists.length > 0
             enabled: root.spotify && root.spotify.currentArtistContextAvailable
-            hasCursor: root.miniCursorActive && root.miniCursor === "artist"
+            hasCursor: root.miniCursorOn("artist") || miniArtistHover.hovered
             foreground: root.foreground
 
             ArtistLinks {
@@ -1090,7 +1105,7 @@ BarWidget {
             height: miniAlbumLinks.implicitHeight
             visible: miniAlbumLinks.fallbackText !== ""
             enabled: root.spotify && root.spotify.currentAlbumContextAvailable
-            hasCursor: root.miniCursorActive && root.miniCursor === "album"
+            hasCursor: root.miniCursorOn("album") || miniAlbumHover.hovered
             foreground: root.foreground
 
             ArtistLinks {
@@ -1139,7 +1154,7 @@ BarWidget {
           id: miniSeekCursor
           width: parent.width
           height: miniSeekSlider.implicitHeight + Style.space(2)
-          hasCursor: root.miniCursorActive && root.miniCursor === "seek"
+          hasCursor: root.miniCursorOn("seek")
           foreground: root.foreground
 
           PlaybackSlider {
@@ -1204,7 +1219,7 @@ BarWidget {
           glyphText: "󰒟"
           foreground: root.foreground
           selected: root.spotify && root.spotify.shuffle
-          hasCursor: root.miniCursorActive && root.miniCursor === "shuffle"
+          hasCursor: root.miniCursorOn("shuffle")
           tooltipText: "Shuffle · Ctrl+S"
           enabled: root.spotify && root.spotify.playbackControllable
           onClicked: if (root.spotify) root.spotify.setShuffle(!root.spotify.shuffle)
@@ -1215,7 +1230,7 @@ BarWidget {
         TransportButton {
           glyphText: "󰒮"
           foreground: root.foreground
-          hasCursor: root.miniCursorActive && root.miniCursor === "previous"
+          hasCursor: root.miniCursorOn("previous")
           tooltipText: "Previous · Ctrl+Left"
           enabled: root.spotify && root.spotify.playbackControllable
           onClicked: if (root.spotify) root.spotify.previous()
@@ -1228,7 +1243,7 @@ BarWidget {
           glyphSize: Style.font.iconLarge
           foreground: root.foreground
           selected: root.spotify && root.spotify.playing
-          hasCursor: root.miniCursorActive && root.miniCursor === "play"
+          hasCursor: root.miniCursorOn("play")
           tooltipText: (root.spotify && root.spotify.playing ? "Pause"
             : (root.spotify && root.spotify.canResumeLastPlayed
               ? "Resume last played" : "Play")) + " · Space"
@@ -1241,7 +1256,7 @@ BarWidget {
         TransportButton {
           glyphText: "󰒭"
           foreground: root.foreground
-          hasCursor: root.miniCursorActive && root.miniCursor === "next"
+          hasCursor: root.miniCursorOn("next")
           tooltipText: "Next · Ctrl+Right"
           enabled: root.spotify && root.spotify.playbackControllable
           onClicked: if (root.spotify) root.spotify.next()
@@ -1253,7 +1268,7 @@ BarWidget {
           glyphText: root.spotify && root.spotify.repeatMode === "track" ? "󰑘" : "󰑖"
           foreground: root.foreground
           selected: root.spotify && root.spotify.repeatMode !== "off"
-          hasCursor: root.miniCursorActive && root.miniCursor === "repeat"
+          hasCursor: root.miniCursorOn("repeat")
           tooltipText: "Repeat: " + Api.repeatModeLabel(root.spotify
             ? root.spotify.repeatMode : "off") + " · Ctrl+R"
           enabled: root.spotify && root.spotify.playbackControllable
@@ -1265,7 +1280,7 @@ BarWidget {
         TransportButton {
           glyphText: "󰎈"
           foreground: root.foreground
-          hasCursor: root.miniCursorActive && root.miniCursor === "lyrics"
+          hasCursor: root.miniCursorOn("lyrics")
           tooltipText: "Open lyrics in Omasing · Ctrl+Shift+L"
           enabled: root.spotify && root.spotify.lyricsAvailable
           onClicked: root.openLyrics()
@@ -1281,7 +1296,7 @@ BarWidget {
         visible: !root.lyricsInstallPromptVisible
           && (!root.spotify || root.spotify.accountConnected)
           && root.spotify && root.spotify.hasPlayer
-        hasCursor: root.miniCursorActive && root.miniCursor === "volume"
+        hasCursor: root.miniCursorOn("volume")
         foreground: root.foreground
 
         Row {
@@ -1364,7 +1379,7 @@ BarWidget {
           text: "Open"
           iconText: "󰏋"
           foreground: root.foreground
-          hasCursor: root.miniCursorActive && root.miniCursor === "open"
+          hasCursor: root.miniCursorOn("open")
           tooltipText: "Open full player · O"
           onClicked: root.openFullPanel()
           onHovered: function(on) { if (on) root.setMiniCursor("open") }
@@ -1379,10 +1394,8 @@ BarWidget {
           foreground: root.foreground
           muted: root.muted
           surfaceKey: root.lyricsRequestKey
-          cancelHasCursor: root.miniCursorActive
-            && root.miniCursor === "prompt-cancel"
-          confirmHasCursor: root.miniCursorActive
-            && root.miniCursor === "prompt-confirm"
+          cancelHasCursor: root.miniCursorOn("prompt-cancel")
+          confirmHasCursor: root.miniCursorOn("prompt-confirm")
           onCanceled: root.dismissLyricsInstallPrompt()
         }
       }
@@ -1412,7 +1425,7 @@ BarWidget {
             iconText: "󰅖"
             foreground: root.foreground
             focusable: true
-            hasCursor: root.miniCursorActive && root.miniCursor === "help-close"
+            hasCursor: root.miniCursorOn("help-close")
             tooltipText: "Close shortcut reference · Ctrl+/ or Esc"
             onClicked: root.toggleMiniShortcutHelp()
             onHovered: function(on) { if (on) root.setMiniCursor("help-close") }

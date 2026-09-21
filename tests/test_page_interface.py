@@ -126,5 +126,17 @@ class PageInterface(unittest.TestCase):
                          f"Panel.qml can show {sorted(shown - built)} but never builds them")
 
 
+class HoverHighlights(unittest.TestCase):
+    def test_controls_draw_only_a_cursor_the_keyboard_placed(self):
+        """Hover moves the cursor too, so drawing it leaves a highlight behind
+        on whatever the pointer last touched."""
+        offenders = []
+        for path in sorted(ROOT.glob("*.qml")):
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                if re.search(r"[hH]asCursor:.*(cursorOn\(|miniCursorActive)", line):
+                    offenders.append(f"{path.name} line {number}")
+        self.assertFalse(offenders, "; ".join(offenders))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1, exit=not sys.stdout.isatty())

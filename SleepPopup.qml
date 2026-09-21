@@ -66,7 +66,7 @@ Popup {
         iconText: "󰔛"
         foreground: popup.panel.foreground
         leftAlign: true
-        hasCursor: popup.panel.cursorOn("popup", "sleep-" + modelData)
+        hasCursor: popup.panel.cursorShown("popup", "sleep-" + modelData)
         KeyHint { region: "popup"; action: "sleep-" + modelData }
         onClicked: {
           if (popup.panel.service) popup.panel.service.setSleepMinutes(modelData)
@@ -80,7 +80,7 @@ Popup {
       iconText: "󰐾"
       foreground: popup.panel.foreground
       leftAlign: true
-      hasCursor: popup.panel.cursorOn("popup", "sleep-track")
+      hasCursor: popup.panel.cursorShown("popup", "sleep-track")
       KeyHint { region: "popup"; action: "sleep-track" }
       onClicked: {
         if (popup.panel.service) popup.panel.service.sleepAfterTrack()
@@ -93,7 +93,7 @@ Popup {
       iconText: "󰓛"
       foreground: popup.panel.foreground
       leftAlign: true
-      hasCursor: popup.panel.cursorOn("popup", "sleep-context")
+      hasCursor: popup.panel.cursorShown("popup", "sleep-context")
       KeyHint { region: "popup"; action: "sleep-context" }
       onClicked: {
         if (popup.panel.service) popup.panel.service.sleepAfterContext()
@@ -107,7 +107,7 @@ Popup {
       iconText: "󰅖"
       foreground: popup.panel.foreground
       leftAlign: true
-      hasCursor: popup.panel.cursorOn("popup", "sleep-cancel")
+      hasCursor: popup.panel.cursorShown("popup", "sleep-cancel")
       KeyHint { region: "popup"; action: "sleep-cancel" }
       onClicked: {
         popup.panel.service.cancelSleepTimer(true)
