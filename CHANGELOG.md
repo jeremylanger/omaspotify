@@ -17,6 +17,10 @@
   the mouse just shows it.
 - Pause fades out and Play fades back in over 200 ms, instead of cutting off
   or starting abruptly.
+- Your listening draws about four times faster. Every day in the grid used to
+  build its own tooltip, which cost more than the whole of the rest of the
+  page put together; the grid now shares one. Hovering a day still names it
+  and how many plays it holds.
 
 ## 2.0.0
 

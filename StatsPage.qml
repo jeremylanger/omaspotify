@@ -17,12 +17,6 @@ Item {
   readonly property var grid: service
     ? Api.heatmapWeeks(service.listeningDays, Date.now(), weeks) : []
 
-  function shade(level) {
-    if (level <= 0) return Style.normalFillFor(panel.foreground, panel.accent)
-    return Qt.rgba(panel.accent.r, panel.accent.g, panel.accent.b,
-      0.22 + 0.24 * level)
-  }
-
   Component.onCompleted: {
     if (!service) return
     service.loadStats()
@@ -80,36 +74,20 @@ Item {
         font.bold: true
       }
 
-      Row {
+      ListeningHeatmap {
+        id: heatmap
+        grid: page.grid
+        accent: page.panel.accent
+        emptyFill: Style.normalFillFor(page.panel.foreground, page.panel.accent)
+        cellSize: Style.space(9)
+        cellRadius: Style.space(2)
         spacing: Style.space(2)
 
-        Repeater {
-          model: page.grid
-
-          Column {
-            required property var modelData
-            spacing: Style.space(2)
-
-            Repeater {
-              model: modelData
-
-              Rectangle {
-                required property var modelData
-                width: Style.space(9)
-                height: width
-                radius: Style.space(2)
-                visible: !modelData.future
-                color: page.shade(modelData.level)
-
-                HoverHandler { id: cellHover }
-                PanelToolTip {
-                  visible: cellHover.hovered
-                  text: modelData.key + " · " + modelData.count
-                    + (modelData.count === 1 ? " play" : " plays")
-                }
-              }
-            }
-          }
+        // One tooltip for the grid: one per day costs more than the page.
+        PanelToolTip {
+          parent: heatmap.hoveredDay
+          visible: heatmap.hoveredDay !== null
+          text: heatmap.hoveredText
         }
       }
 
