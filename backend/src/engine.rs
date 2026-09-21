@@ -6,7 +6,10 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
+use librespot_connect::{
+    ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options as ContextOptions,
+    PlayingTrack, Spirc,
+};
 use librespot_core::{
     SpotifyUri,
     authentication::Credentials,
@@ -26,6 +29,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{
     config::BackendConfig,
+    fade::Fader,
     protocol::{Command, Lifecycle, PlaybackStatus, ProtocolError, RepeatMode, Track},
     state::StateStore,
 };
@@ -34,6 +38,9 @@ const INITIAL_VOLUME: u16 = ((u16::MAX as u32 * 90) / 100) as u16;
 const ENGINE_QUEUE_CAPACITY: usize = 64;
 const RECONNECT_LIMIT: usize = 5;
 const RECONNECT_WINDOW: Duration = Duration::from_secs(10 * 60);
+const SESSION_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+const SPIRC_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+const PAUSE_SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
 const AUDIO_KEY_UNAVAILABLE_CODE: &str = "audio_key_unavailable";
 const AUDIO_KEY_UNAVAILABLE_MESSAGE: &str = "Spotify did not provide the audio key required to play this track on this computer. Try another Spotify Connect device.";
 
@@ -90,18 +97,17 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
     let mixer = mixer_builder(MixerConfig::default()).context("failed to create soft mixer")?;
     let session = Session::new(session_config.clone(), Some(runtime_cache.clone()));
     let audio_device = config.audio_device.clone();
-    let player = Player::new(
-        player_config,
-        session.clone(),
-        mixer.get_soft_volume(),
-        move || sink_builder(audio_device.clone(), AudioFormat::S16),
-    );
+    let fader = Fader::default();
+    let player = Player::new(player_config, session.clone(), mixer.get_soft_volume(), {
+        let fader = fader.clone();
+        move || fader.wrap(sink_builder(audio_device.clone(), AudioFormat::S16))
+    });
     let events = player.get_player_event_channel();
 
     let connect_config = ConnectConfig {
         name: config.device_name,
         device_type: DeviceType::Computer,
-        initial_volume: INITIAL_VOLUME,
+        initial_volume: initial_volume(&runtime_cache),
         disable_volume: false,
         volume_steps: 64,
         ..ConnectConfig::default()
@@ -119,7 +125,7 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
 
     state.update(|current| {
         current.lifecycle = Lifecycle::Ready;
-        current.volume = INITIAL_VOLUME;
+        current.volume = connect_config.initial_volume;
         current.error_code.clear();
         current.error.clear();
         true
@@ -127,10 +133,14 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
 
     let (commands, command_rx) = mpsc::channel(ENGINE_QUEUE_CAPACITY);
     let (current_spirc_tx, current_spirc_rx) = watch::channel(Some(Arc::clone(&spirc)));
+    let (track_list_tx, track_list_rx) = watch::channel(Vec::new());
     tokio::spawn(run_commands(
         command_rx,
         current_spirc_rx,
         Arc::clone(&player),
+        fader,
+        state.clone(),
+        track_list_tx,
     ));
     tokio::spawn(run_events(events, state.clone()));
 
@@ -149,6 +159,7 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
             spirc,
             spirc_task,
             current_spirc_tx,
+            track_list_rx,
             state,
             shutdown_rx,
         )
@@ -175,6 +186,7 @@ async fn supervise_sessions(
     mut spirc: Arc<Spirc>,
     mut spirc_task: tokio::task::JoinHandle<()>,
     current_spirc: watch::Sender<Option<Arc<Spirc>>>,
+    track_list: watch::Receiver<Vec<String>>,
     state: StateStore,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<()> {
@@ -184,6 +196,16 @@ async fn supervise_sessions(
         tokio::select! {
             result = &mut spirc_task => {
                 result.context("librespot session task failed")?;
+            }
+            () = session_lost(&session) => {
+                if let Some(position_ms) = state.with(position_to_refresh) {
+                    let _ = spirc.set_position_ms(position_ms);
+                }
+                let _ = spirc.shutdown();
+                match tokio::time::timeout(SPIRC_STOP_TIMEOUT, &mut spirc_task).await {
+                    Ok(result) => result.context("librespot session task failed")?,
+                    Err(_) => spirc_task.abort(),
+                }
             }
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() {
@@ -211,10 +233,10 @@ async fn supervise_sessions(
         if !session.is_invalid() {
             session.shutdown();
         }
-        session = Session::new(session_config.clone(), Some(runtime_cache.clone()));
+        session = replacement_session(&session, &session_config, Some(runtime_cache.clone()));
         player.set_session(session.clone());
         let reconnect = Spirc::new(
-            connect_config.clone(),
+            reconnect_config(&connect_config, mixer.as_ref()),
             session.clone(),
             credentials.clone(),
             Arc::clone(&player),
@@ -234,6 +256,11 @@ async fn supervise_sessions(
         };
 
         spirc = Arc::new(next_spirc);
+        let list = track_list.borrow().clone();
+        if let Some(options) = state.with(|current| list_to_restore(&list, current)) {
+            // librespot runs this after its own hand-back, and ignores it if none happened.
+            let _ = spirc.load(LoadRequest::from_tracks(list, options));
+        }
         spirc_task = tokio::spawn(next_task);
         current_spirc.send_replace(Some(Arc::clone(&spirc)));
         state.update(|current| {
@@ -243,6 +270,71 @@ async fn supervise_sessions(
             true
         });
         log::info!("reconnected the librespot session");
+    }
+}
+
+// Spotify hands the last song back to a device that returns with the same session id.
+fn replacement_session(
+    previous: &Session,
+    config: &SessionConfig,
+    cache: Option<Cache>,
+) -> Session {
+    let session = Session::new(config.clone(), cache);
+    session.set_session_id(&previous.session_id());
+    session
+}
+
+fn reconnect_config(base: &ConnectConfig, mixer: &dyn mixer::Mixer) -> ConnectConfig {
+    ConnectConfig {
+        initial_volume: mixer.volume(),
+        ..base.clone()
+    }
+}
+
+// On letting go, librespot moves even a paused song on by the time since its last update.
+fn position_to_refresh(state: &crate::protocol::BackendState) -> Option<u32> {
+    (state.playback == PlaybackStatus::Paused).then_some(state.position_ms)
+}
+
+// The songs a load asked for, or none when it played an album or playlist.
+fn track_list_of(command: &Command) -> Option<Vec<String>> {
+    match command {
+        Command::Load {
+            context_uri: None,
+            uris,
+            ..
+        } => Some(uris.clone()),
+        Command::Load { .. } => Some(Vec::new()),
+        _ => None,
+    }
+}
+
+// Spotify cannot hand back a plain song list, so a reconnect loads it again itself.
+fn list_to_restore(
+    list: &[String],
+    state: &crate::protocol::BackendState,
+) -> Option<LoadRequestOptions> {
+    let track = state
+        .track
+        .as_ref()
+        .filter(|track| list.contains(&track.uri))?;
+    Some(LoadRequestOptions {
+        start_playing: false,
+        seek_to: state.position_ms,
+        playing_track: Some(PlayingTrack::Uri(track.uri.clone())),
+        context_options: Some(LoadContextOptions::Options(ContextOptions {
+            shuffle: state.shuffle,
+            repeat: state.repeat == RepeatMode::Context,
+            repeat_track: state.repeat == RepeatMode::Track,
+        })),
+    })
+}
+
+// librespot only notices a dropped connection on its next event, which never comes while paused.
+async fn session_lost(session: &Session) {
+    let mut check = tokio::time::interval(SESSION_CHECK_INTERVAL);
+    while !session.is_invalid() {
+        check.tick().await;
     }
 }
 
@@ -260,12 +352,17 @@ fn record_reconnect(attempts: &mut VecDeque<Instant>, now: Instant) -> bool {
     true
 }
 
+// librespot saves every volume change, so start where the listener left it.
+fn initial_volume(cache: &Cache) -> u16 {
+    cache.volume().unwrap_or(INITIAL_VOLUME)
+}
+
 fn open_runtime_cache(config: &BackendConfig) -> Result<Cache> {
     let credentials = config.credentials_root.join("zeroconf");
     let audio_path = config.audio_cache.then_some(config.cache_root.as_path());
     Cache::new(
         Some(credentials.as_path()),
-        Some(config.cache_root.as_path()),
+        Some(config.credentials_root.as_path()),
         audio_path,
         config.max_cache_size,
     )
@@ -307,20 +404,61 @@ async fn run_commands(
     mut receiver: mpsc::Receiver<EngineRequest>,
     current_spirc: watch::Receiver<Option<Arc<Spirc>>>,
     player: Arc<Player>,
+    fader: Fader,
+    state: StateStore,
+    track_list: watch::Sender<Vec<String>>,
 ) {
     while let Some(request) = receiver.recv().await {
-        let result = match current_spirc.borrow().clone() {
-            Some(spirc) => execute(&spirc, &player, request.command)
-                .map(|()| serde_json::json!({}))
-                .map_err(|error| ProtocolError::new("engine_error", error.to_string())),
-            None => Err(ProtocolError::new(
-                "engine_reconnecting",
-                "playback is reconnecting to Spotify",
-            )),
-        };
+        let list = track_list_of(&request.command);
+        let result = softly(
+            &fader,
+            &state,
+            request.command,
+            |command| match current_spirc.borrow().clone() {
+                Some(spirc) => execute(&spirc, &player, command)
+                    .map(|()| serde_json::json!({}))
+                    .map_err(|error| ProtocolError::new("engine_error", error.to_string())),
+                None => Err(ProtocolError::new(
+                    "engine_reconnecting",
+                    "playback is reconnecting to Spotify",
+                )),
+            },
+        )
+        .await;
+        if let Some(list) = list.filter(|_| result.is_ok()) {
+            track_list.send_replace(list);
+        }
         if let Some(reply) = request.reply {
             let _ = reply.send(result);
         }
+    }
+}
+
+// Pausing fades out first and resuming fades in, so neither starts or stops abruptly.
+async fn softly<R, E>(
+    fader: &Fader,
+    state: &StateStore,
+    command: Command,
+    execute: impl FnOnce(Command) -> Result<R, E>,
+) -> Result<R, E> {
+    match (command, state.with(|current| current.playback)) {
+        (Command::Pause | Command::Toggle, PlaybackStatus::Playing) => {
+            fader.fade_out().await;
+            let result = execute(Command::Pause);
+            if result.is_ok() {
+                // Let the pause land, so a quick resume is not read as another pause.
+                let mut changes = state.subscribe();
+                let paused =
+                    changes.wait_for(|current| current.playback != PlaybackStatus::Playing);
+                let _ = tokio::time::timeout(PAUSE_SETTLE_TIMEOUT, paused).await;
+            }
+            result
+        }
+        (command @ (Command::Play | Command::Toggle), PlaybackStatus::Paused) => {
+            fader.fade_in_next_start();
+            execute(command)
+        }
+        (command, _) => execute(command),
     }
 }
 
@@ -691,7 +829,13 @@ pub async fn send_with_reply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::BackendState;
+    use crate::{
+        fade::{
+            FADE_FRAMES,
+            testing::{Recorder, write_frames},
+        },
+        protocol::BackendState,
+    };
 
     fn test_uri() -> SpotifyUri {
         SpotifyUri::from_uri("spotify:track:14XWXWv5FoCbFzLksawpEe").unwrap()
@@ -813,6 +957,253 @@ mod tests {
             start + Duration::from_secs(RECONNECT_LIMIT as u64)
         ));
         assert!(record_reconnect(&mut attempts, start + RECONNECT_WINDOW));
+    }
+
+    #[tokio::test]
+    async fn a_dropped_connection_is_noticed_while_nothing_is_playing() {
+        let session = Session::new(SessionConfig::default(), None);
+        let lost = tokio::spawn({
+            let session = session.clone();
+            async move { session_lost(&session).await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!lost.is_finished());
+
+        session.shutdown();
+        tokio::time::timeout(SESSION_CHECK_INTERVAL * 2, lost)
+            .await
+            .expect("the dropped connection went unnoticed")
+            .unwrap();
+    }
+
+    #[test]
+    fn only_a_paused_song_needs_its_position_refreshed_before_letting_go() {
+        let state = |playback| BackendState {
+            playback,
+            position_ms: 89_822,
+            ..BackendState::default()
+        };
+        assert_eq!(
+            position_to_refresh(&state(PlaybackStatus::Paused)),
+            Some(89_822)
+        );
+        assert_eq!(position_to_refresh(&state(PlaybackStatus::Playing)), None);
+        assert_eq!(position_to_refresh(&state(PlaybackStatus::Stopped)), None);
+    }
+
+    fn load(context_uri: Option<&str>, uris: &[&str]) -> Command {
+        Command::Load {
+            context_uri: context_uri.map(String::from),
+            uris: uris.iter().map(|uri| uri.to_string()).collect(),
+            offset_uri: None,
+            offset_index: Some(1),
+            position_ms: 0,
+            play: true,
+        }
+    }
+
+    #[test]
+    fn a_song_list_is_remembered_until_an_album_or_playlist_replaces_it() {
+        assert_eq!(
+            track_list_of(&load(None, &["spotify:track:a", "spotify:track:b"])),
+            Some(vec!["spotify:track:a".into(), "spotify:track:b".into()])
+        );
+        assert_eq!(
+            track_list_of(&load(Some("spotify:album:x"), &[])),
+            Some(Vec::new())
+        );
+        assert_eq!(track_list_of(&Command::Next), None);
+    }
+
+    fn state_on(uri: &str) -> BackendState {
+        BackendState {
+            playback: PlaybackStatus::Paused,
+            track: Some(Track {
+                uri: uri.into(),
+                title: String::new(),
+                artists: Vec::new(),
+                album: String::new(),
+                art_url: String::new(),
+                duration_ms: 186_000,
+                item_type: "track".into(),
+            }),
+            position_ms: 89_822,
+            shuffle: true,
+            repeat: RepeatMode::Context,
+            ..BackendState::default()
+        }
+    }
+
+    #[test]
+    fn a_song_list_comes_back_paused_at_the_same_song_and_spot() {
+        let list = ["spotify:track:a", "spotify:track:b", "spotify:track:c"].map(String::from);
+        let options = list_to_restore(&list, &state_on("spotify:track:b")).unwrap();
+        assert!(!options.start_playing);
+        assert_eq!(options.seek_to, 89_822);
+        assert!(matches!(
+            options.playing_track,
+            Some(PlayingTrack::Uri(ref uri)) if uri == "spotify:track:b"
+        ));
+        assert!(matches!(
+            options.context_options,
+            Some(LoadContextOptions::Options(ContextOptions {
+                shuffle: true,
+                repeat: true,
+                repeat_track: false,
+            }))
+        ));
+    }
+
+    #[test]
+    fn nothing_is_reloaded_unless_the_song_belongs_to_the_list() {
+        let list = ["spotify:track:a", "spotify:track:c"].map(String::from);
+        assert!(list_to_restore(&list, &state_on("spotify:track:b")).is_none());
+        assert!(list_to_restore(&[], &state_on("spotify:track:b")).is_none());
+        let stopped = BackendState {
+            track: None,
+            ..state_on("spotify:track:a")
+        };
+        assert!(list_to_restore(&list, &stopped).is_none());
+    }
+
+    #[test]
+    fn the_volume_is_remembered_across_restarts_outside_the_disposable_cache() {
+        let root = std::env::temp_dir().join(format!("omaspotify-volume-{}", std::process::id()));
+        let config = BackendConfig {
+            device_name: "Test".into(),
+            bitrate: librespot_playback::config::Bitrate::Bitrate320,
+            bitrate_kbps: 320,
+            autoplay: true,
+            normalisation: true,
+            normalisation_pregain_db: 0.0,
+            audio_device: None,
+            audio_cache: true,
+            max_cache_size: None,
+            cache_root: root.join("cache"),
+            credentials_root: root.join("state"),
+        };
+        let cache = open_runtime_cache(&config).unwrap();
+        assert_eq!(initial_volume(&cache), INITIAL_VOLUME);
+
+        cache.save_volume(20_000);
+        let restarted = open_runtime_cache(&config).unwrap();
+        assert_eq!(initial_volume(&restarted), 20_000);
+        assert!(root.join("state/volume").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_replacement_session_keeps_the_previous_session_id() {
+        let config = SessionConfig::default();
+        let previous = Session::new(config.clone(), None);
+        let replacement = replacement_session(&previous, &config, None);
+        assert_eq!(replacement.session_id(), previous.session_id());
+    }
+
+    fn fading_setup(
+        playback: PlaybackStatus,
+    ) -> (
+        Fader,
+        StateStore,
+        Box<dyn librespot_playback::audio_backend::Sink>,
+        Recorder,
+    ) {
+        let fader = Fader::default();
+        let recorder = Recorder::default();
+        let mut sink = fader.wrap(Box::new(recorder.clone()));
+        sink.start().unwrap();
+        let state = StateStore::new(BackendState {
+            playback,
+            ..BackendState::default()
+        });
+        (fader, state, sink, recorder)
+    }
+
+    // Runs a command the way the queue does, noting what reached librespot.
+    async fn run(fader: &Fader, state: &StateStore, command: Command) -> Command {
+        let mut sent = None;
+        softly(fader, state, command, |command| {
+            sent = Some(command);
+            Ok::<_, ()>(())
+        })
+        .await
+        .unwrap();
+        sent.unwrap()
+    }
+
+    fn set_playback(state: &StateStore, playback: PlaybackStatus) {
+        state.update(|current| replace_if_changed(&mut current.playback, playback));
+    }
+
+    #[tokio::test]
+    async fn toggling_while_playing_fades_out_before_pausing() {
+        let (fader, state, mut sink, recorder) = fading_setup(PlaybackStatus::Playing);
+        let command = tokio::spawn({
+            let (fader, state) = (fader.clone(), state.clone());
+            async move { run(&fader, &state, Command::Toggle).await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!command.is_finished());
+
+        write_frames(sink.as_mut(), FADE_FRAMES + 1);
+        set_playback(&state, PlaybackStatus::Paused);
+        assert_eq!(command.await.unwrap(), Command::Pause);
+        assert_eq!(recorder.frames().last(), Some(&0.0));
+    }
+
+    #[tokio::test]
+    async fn a_quick_resume_is_not_mistaken_for_another_pause() {
+        let (fader, state, mut sink, recorder) = fading_setup(PlaybackStatus::Playing);
+        let pausing = tokio::spawn({
+            let (fader, state) = (fader.clone(), state.clone());
+            async move { run(&fader, &state, Command::Toggle).await }
+        });
+        tokio::task::yield_now().await;
+        write_frames(sink.as_mut(), FADE_FRAMES + 1);
+        tokio::task::yield_now().await;
+        assert!(!pausing.is_finished());
+
+        set_playback(&state, PlaybackStatus::Paused);
+        assert_eq!(pausing.await.unwrap(), Command::Pause);
+        assert_eq!(run(&fader, &state, Command::Toggle).await, Command::Toggle);
+        sink.stop().unwrap();
+        sink.start().unwrap();
+        let resumed_at = recorder.frames().len();
+        write_frames(sink.as_mut(), 1);
+        assert!(recorder.frames()[resumed_at] < 0.01);
+    }
+
+    #[tokio::test]
+    async fn resuming_a_paused_song_fades_back_in() {
+        let (fader, state, mut sink, recorder) = fading_setup(PlaybackStatus::Paused);
+        sink.stop().unwrap();
+        assert_eq!(run(&fader, &state, Command::Toggle).await, Command::Toggle);
+        sink.start().unwrap();
+        write_frames(sink.as_mut(), 1);
+        assert!(recorder.frames()[0] < 0.01);
+    }
+
+    #[tokio::test]
+    async fn other_commands_are_not_faded() {
+        let (fader, state, mut sink, recorder) = fading_setup(PlaybackStatus::Playing);
+        assert_eq!(run(&fader, &state, Command::Next).await, Command::Next);
+        write_frames(sink.as_mut(), 10);
+        assert!(recorder.frames().iter().all(|gain| *gain == 1.0));
+    }
+
+    #[test]
+    fn a_reconnect_keeps_the_current_volume() {
+        let mixer = mixer::find(Some("softvol")).unwrap()(MixerConfig::default()).unwrap();
+        mixer.set_volume(20_000);
+        let base = ConnectConfig {
+            initial_volume: INITIAL_VOLUME,
+            ..ConnectConfig::default()
+        };
+        assert_ne!(mixer.volume(), INITIAL_VOLUME);
+        assert_eq!(
+            reconnect_config(&base, mixer.as_ref()).initial_volume,
+            mixer.volume()
+        );
     }
 }
 

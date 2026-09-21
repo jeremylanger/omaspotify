@@ -2,10 +2,21 @@
 
 ## Unreleased
 
+- Fixed Play doing nothing after the player had sat paused for a while.
+  Spotify drops the connection now and then, and a paused player did not
+  notice until the next click, which the reconnect then lost; it also came
+  back with nothing loaded. The player now reconnects within a second and
+  picks up the same song at the same spot, with the rest of the album,
+  playlist or song list still queued behind it. If the connection drops
+  mid-song, the song pauses and Play picks it up again.
+- The volume stays where you left it. Every reconnect and every restart of
+  playback used to put it back to the default, which the slider shows as 77%.
 - Hovering a button no longer leaves its highlight behind once the pointer
   moves on, and the volume and seek bars no longer light up on hover. Arrow
   keys and Tab still show where the keyboard is; the first key after using
   the mouse just shows it.
+- Pause fades out and Play fades back in over 200 ms, instead of cutting off
+  or starting abruptly.
 
 ## 2.0.0
 

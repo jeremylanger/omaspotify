@@ -1,5 +1,6 @@
 mod config;
 mod engine;
+mod fade;
 mod failure;
 mod mpris;
 mod protocol;

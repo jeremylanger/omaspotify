@@ -39,6 +39,19 @@ cannot take the supervised process's bus ownership.
 
 If librespot's session task ends, the backend replaces only its Session and
 Spirc pair. The socket, MPRIS name, player, and command queue remain alive.
+librespot only notices a dropped connection on its next event, which never
+comes while paused, so the backend checks the session every second and ends
+the Spirc itself. It first refreshes a paused song's position, because
+librespot moves even a paused song on by the time since its last update when
+it lets go. The replacement keeps the old session id, so Spotify hands the
+same song back, paused at the same spot, and it keeps the current volume.
+librespot saves every volume change to `$XDG_STATE_HOME/omaspotify/volume`,
+and the backend starts from that value.
+Spotify cannot hand back a plain song list (librespot names it
+`spotify:web-api`, which Spotify will not resolve), so the backend remembers
+the last list it was asked to play and loads it again at the same song. It
+does so only when that song is in the list, and an album or playlist load
+forgets the list.
 Five reconnects are allowed in ten minutes; exceeding that limit exits so
 systemd can perform the existing clean restart.
 

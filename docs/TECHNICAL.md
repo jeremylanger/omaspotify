@@ -31,13 +31,21 @@ This backend is the only playback engine; there is no second daemon.
 The unit sets `PULSE_LATENCY_MSEC=250` only for local playback and caps
 librespot's private player runtime at two Tokio workers. That buffer is what
 stands between a stall anywhere in the decoder and a hole in the audio, and
-librespot drains it before it pauses, so the number is also how long a pause
-takes to go quiet. Measured on the sink monitor: 250 ms rides out a 140 ms
-stall and pauses in 142 ms. The backend's own control runtime is
-single-threaded; keeping two player workers still allows
-network fetching, preloading, and blocking decoder work to overlap. Quickshell
-interpolates MPRIS position locally, so the backend publishes one authoritative
-position update per second instead of four.
+librespot drains it before it pauses. Measured on the sink monitor: 250 ms
+rides out a 140 ms stall, and the audio already queued plays for about 150 ms
+after Pause is pressed. The backend's own control runtime is single-threaded;
+keeping two player workers still allows network fetching, preloading, and
+blocking decoder work to overlap. Quickshell interpolates MPRIS position
+locally, so the backend publishes one authoritative position update per second
+instead of four.
+
+Pause and Play from this app fade over 200 ms. The backend wraps librespot's
+audio output and ramps the volume of what it writes: a pause first fades the
+next 200 ms of audio to silence and only then asks librespot to pause, so the
+sound goes quiet about 350 ms after the press. A resume ramps up from
+silence. Pauses and resumes started from another Spotify device are not faded.
+If a pause never lands, the sound comes back after two seconds of silence
+rather than playing on muted.
 
 MPRIS uses a PID-qualified instance bus name, as required by the server library.
 Quickshell discovers the backend by its `librespot` identity and desktop entry.
