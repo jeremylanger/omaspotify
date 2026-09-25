@@ -1359,6 +1359,33 @@ function volumeFlushInterval(target) {
   return VOLUME_FLUSH_MS
 }
 
+// Sonos folds shuffle and repeat into one play mode. Bare SHUFFLE also repeats
+// the queue; shuffle on its own is SHUFFLE_NOREPEAT.
+var SONOS_PLAY_MODES = {
+  NORMAL: { shuffle: false, repeatMode: "off" },
+  REPEAT_ALL: { shuffle: false, repeatMode: "context" },
+  REPEAT_ONE: { shuffle: false, repeatMode: "track" },
+  SHUFFLE_NOREPEAT: { shuffle: true, repeatMode: "off" },
+  SHUFFLE: { shuffle: true, repeatMode: "context" },
+  SHUFFLE_REPEAT_ONE: { shuffle: true, repeatMode: "track" }
+}
+
+function sonosPlayMode(repeatMode, shuffle) {
+  var repeat = repeatMode === "track" || repeatMode === "context"
+    ? repeatMode : "off"
+  for (var mode in SONOS_PLAY_MODES) {
+    var state = SONOS_PLAY_MODES[mode]
+    if (state.shuffle === (shuffle === true) && state.repeatMode === repeat)
+      return mode
+  }
+  return "NORMAL"
+}
+
+function sonosPlayModeState(mode) {
+  var state = SONOS_PLAY_MODES[String(mode || "").toUpperCase()]
+  return state ? { shuffle: state.shuffle, repeatMode: state.repeatMode } : null
+}
+
 function nextVolume(current, delta) {
   return clampUnit((Number(current) || 0) + (Number(delta) || 0))
 }

@@ -205,6 +205,27 @@ TestCase {
     verify(Api.VOLUME_FLUSH_SONOS_MS > Api.VOLUME_FLUSH_MS)
   }
 
+  function test_sonosPlayModeCarriesShuffleAndRepeatBothWays() {
+    // Bare SHUFFLE also repeats the queue; shuffle alone is SHUFFLE_NOREPEAT.
+    var modes = [
+      ["NORMAL", false, "off"],
+      ["REPEAT_ALL", false, "context"],
+      ["REPEAT_ONE", false, "track"],
+      ["SHUFFLE_NOREPEAT", true, "off"],
+      ["SHUFFLE", true, "context"],
+      ["SHUFFLE_REPEAT_ONE", true, "track"]
+    ]
+    for (var i = 0; i < modes.length; i++) {
+      var mode = modes[i]
+      compare(Api.sonosPlayMode(mode[2], mode[1]), mode[0], mode[0])
+      compare(Api.sonosPlayModeState(mode[0]),
+        { shuffle: mode[1], repeatMode: mode[2] }, mode[0])
+    }
+    compare(Api.sonosPlayModeState("shuffle_repeat_one"),
+      { shuffle: true, repeatMode: "track" })
+    compare(Api.sonosPlayModeState("PARTY"), null)
+  }
+
   function test_pendingSliderVolumeHoldsUntilPlayerAcknowledgesIt() {
     var pending = { slider: 0.55, expiresAt: 9000 }
     verify(Api.pendingSliderVolumeShouldHold(0.5, pending, 2000))

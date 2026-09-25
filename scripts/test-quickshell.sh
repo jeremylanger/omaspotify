@@ -41,3 +41,28 @@ if rg -i 'ReferenceError|TypeError|binding loop|Cannot assign|Unable to assign|F
   exit 1
 fi
 echo 'Quickshell app smoke test passed.'
+
+mkdir -p "$test_root/sonos/plugin/scripts" "$test_root/sonos-state"
+cp "$source_root/"*.qml "$source_root/"*.js "$test_root/sonos/plugin/"
+cp "$source_root/tests/integration/SonosControl.qml" "$test_root/sonos/shell.qml"
+# Stands in for the speaker: answers each command after a short pause.
+cat > "$test_root/sonos/plugin/scripts/spotify-connect-device.py" <<'HELPER'
+#!/bin/sh
+read -r device; read -r action; read -r value
+sleep 0.2
+printf '{"id":"%s","status":"controlled","action":"%s"}\n' "$device" "$action"
+HELPER
+chmod +x "$test_root/sonos/plugin/scripts/spotify-connect-device.py"
+env QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic NO_AT_BRIDGE=1 XDG_STATE_HOME="$test_root/sonos-state" \
+  timeout 15s dbus-run-session -- qs --no-color -p "$test_root/sonos" > "$test_root/sonos-output" 2>&1 || {
+  cat "$test_root/sonos-output"
+  exit 1
+}
+rg -q SONOS_CONTROL_PASS "$test_root/sonos-output" || {
+  cat "$test_root/sonos-output"
+  exit 1
+}
+if rg -i 'ReferenceError|TypeError|binding loop|Cannot assign|Unable to assign' "$test_root/sonos-output"; then
+  exit 1
+fi
+echo 'Quickshell Sonos control test passed.'

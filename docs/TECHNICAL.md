@@ -180,11 +180,14 @@ The app therefore resolves that same receiver on the LAN and sends fixed UPnP
 AVTransport or RenderingControl actions for play, pause, previous, next, seek,
 shuffle/repeat mode, and volume. Targets still come only from validated local
 Spotify Connect discovery. Discovery also reads the current Sonos master volume
-from RenderingControl because Spotify's `volume_percent` field is nullable; the
-UI remembers that value and updates it immediately after a volume command. The
-helper drops any command issued while an earlier one is still running, so a
-volume drag checks `controlBusy` and retries the queued value instead of losing
-it. When playback has moved elsewhere, a local Play wake is attempted first;
+from RenderingControl because Spotify's `volume_percent` field is nullable.
+That reading only stands in while Spotify reports none: whichever reading
+arrived last, from Spotify, a discovery sweep or a volume command, is shown.
+Shuffle and repeat travel as one Sonos play mode, mapped both ways through a
+single table in `Api.js`. A command issued while an earlier one is still running
+waits and runs next; a newer volume, seek, mode or play/pause replaces a waiting
+one of the same kind, while skips are kept. When playback has moved elsewhere,
+a local Play wake is attempted first;
 the OAuth activation flow remains the fallback for a Sonos that has actually
 lost its Spotify session. Receiver discovery and requests are retried briefly
 because Sonos can sleep its endpoint during a handoff.

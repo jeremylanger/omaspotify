@@ -51,7 +51,8 @@ SONOS_CLIENT_ID = "9b377073ea334637b1406f329ce005de"
 SONOS_AVTRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1"
 SONOS_RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1"
 SONOS_PLAY_MODES = {
-    "NORMAL", "REPEAT_ALL", "REPEAT_ONE", "SHUFFLE", "SHUFFLE_NOREPEAT"
+    "NORMAL", "REPEAT_ALL", "REPEAT_ONE", "SHUFFLE", "SHUFFLE_NOREPEAT",
+    "SHUFFLE_REPEAT_ONE",
 }
 
 

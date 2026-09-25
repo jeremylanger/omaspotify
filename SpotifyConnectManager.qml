@@ -29,11 +29,10 @@ Item {
   property string controlResult: ""
   property string lastError: ""
 
-  // control() silently drops commands while a helper process is in flight.
-  // Callers that repeat a command, such as a volume drag, check this so they can
-  // retry instead of losing the value they sent last.
-  readonly property bool controlBusy: controlling || controlCommand.running
-    || activating
+  // Commands that arrive while the helper is busy wait here and run in order.
+  // A newer setting replaces a waiting one of the same kind, so only the last
+  // volume, seek, play mode or play/pause press is sent. Skips all count.
+  property var queuedControls: []
 
   signal refreshed()
   signal refreshFailed(string reason)
@@ -76,11 +75,14 @@ Item {
     var requested = String(deviceId || "")
     var command = String(action || "").trim().toLowerCase()
     var argument = String(value === undefined ? "" : value).trim()
-    if (controlling || controlCommand.running || activating
-        || !pluginDir || !validDeviceId(requested)
+    if (!pluginDir || !validDeviceId(requested)
         || ["play", "pause", "next", "previous", "seek", "volume", "mode"]
           .indexOf(command) < 0
-        || argument.length > 128 || /[\r\n]/.test(argument)) return
+        || argument.length > 128 || /[\r\n]/.test(argument)) return false
+    if (controlling || controlCommand.running || activating) {
+      queueControl({ deviceId: requested, action: command, value: argument })
+      return true
+    }
     controlling = true
     controllingDeviceId = requested
     controlAction = command
@@ -90,6 +92,31 @@ Item {
     lastError = ""
     controlCommand.command = [pluginDir + "/scripts/spotify-connect-device.py", "control"]
     controlCommand.running = true
+    return true
+  }
+
+  function controlKind(action) {
+    return action === "play" || action === "pause" ? "transport" : action
+  }
+
+  function queueControl(entry) {
+    var kind = controlKind(entry.action)
+    var next = queuedControls.slice()
+    var index = kind === "next" || kind === "previous" ? -1
+      : next.findIndex(function(item) {
+        return item.deviceId === entry.deviceId && controlKind(item.action) === kind
+      })
+    if (index >= 0) next[index] = entry
+    // A held skip key must not line up minutes of skips.
+    else if (next.length < 8) next.push(entry)
+    queuedControls = next
+  }
+
+  function runQueuedControl() {
+    if (!queuedControls.length || controlling || activating) return
+    var entry = queuedControls[0]
+    queuedControls = queuedControls.slice(1)
+    control(entry.deviceId, entry.action, entry.value)
   }
 
   function rememberVolume(deviceId, value) {
@@ -187,6 +214,7 @@ Item {
         root.lastError = "Could not connect to this Spotify Connect device"
         root.activationFailed(root.lastError)
       }
+      root.runQueuedControl()
     }
   }
 
@@ -216,9 +244,13 @@ Item {
         root.lastError = ""
         root.controlled(requested, action, value)
       } else {
+        // The speaker is likely gone; do not make the user wait out a
+        // failure for every press that was waiting behind this one.
+        root.queuedControls = []
         root.lastError = "Could not control this Sonos speaker"
         root.controlFailed(requested, root.lastError)
       }
+      root.runQueuedControl()
     }
   }
 }

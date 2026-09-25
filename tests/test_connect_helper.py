@@ -434,6 +434,23 @@ class ConnectHelperTests(unittest.TestCase):
             {"InstanceID": "0", "Unit": "REL_TIME", "Target": "01:02:03"},
         )
 
+    def test_sonos_accepts_shuffle_with_repeat_one(self) -> None:
+        receiver = {
+            "id": "4c1e461f8fe6be10d41c504f6e5121a5275d1d6d",
+            "address": "192.168.1.10",
+            "port": 1400,
+            "brand": "Sonos",
+        }
+        with mock.patch.object(helper, "discover_receivers", return_value=[receiver]), \
+                mock.patch.object(helper, "request_sonos_soap") as soap:
+            helper.control_receiver(receiver["id"], "mode", "SHUFFLE_REPEAT_ONE")
+
+        self.assertEqual(soap.call_args.args[3], "SetPlayMode")
+        self.assertEqual(
+            soap.call_args.args[4],
+            {"InstanceID": "0", "NewPlayMode": "SHUFFLE_REPEAT_ONE"},
+        )
+
     def test_receiver_request_retries_transient_sleep(self) -> None:
         with mock.patch.object(
             helper,

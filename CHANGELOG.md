@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- On a Sonos, shuffle and repeat-one can now be on together. Turning shuffle
+  on during repeat-one did nothing, and switching repeat to repeat-one turned
+  shuffle off.
+- A press on a Sonos while it is still carrying out the last one now waits its
+  turn. It used to vanish, such as a shuffle pressed right after moving the
+  seek bar. If several presses pile up, only the last of each kind is sent,
+  and every skip counts.
+- The Sonos volume slider now picks up changes made elsewhere, such as in the
+  Sonos app or with the speaker's own buttons, once Spotify passes them on. It
+  used to stay at whatever the speaker said when it was last looked for on the
+  network.
+
 ## 2.0.1
 
 - Fixed Play doing nothing after the player had sat paused for a while.

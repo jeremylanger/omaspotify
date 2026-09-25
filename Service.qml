@@ -119,6 +119,7 @@ Item {
   readonly property alias api: spotifyApi
   readonly property alias daemon: daemonManager
   readonly property alias backend: backendClient
+  readonly property alias connectManager: spotifyConnectManager
   readonly property bool accountConnected: authManager.loggedIn
   readonly property bool sessionPending: !authManager.sessionChecked
   readonly property bool fullyConnected: daemonManager.playbackReady
@@ -1341,18 +1342,25 @@ Item {
     return true
   }
 
+  function remoteVolumeKnown(device) {
+    return rememberedRemoteVolumePercent >= 0 && !!rememberedRemoteVolumeDevice
+      && Api.playbackDevicesMatch(rememberedRemoteVolumeDevice, device)
+  }
+
   function displayedRemoteVolumePercent(device) {
     if (Api.pendingRemoteVolumeShouldHold(device, pendingRemoteVolume,
         Date.now()))
       return Math.max(0, Math.min(100,
         Number(pendingRemoteVolume.volumePercent) || 0))
-    if (rememberedRemoteVolumePercent >= 0 && rememberedRemoteVolumeDevice
-        && Api.playbackDevicesMatch(rememberedRemoteVolumeDevice, device))
-      return rememberedRemoteVolumePercent
+    if (remoteVolumeKnown(device)) return rememberedRemoteVolumePercent
     var reported = Api.normalizeVolumePercent((device || {}).volumePercent)
     return reported === null ? 0 : reported
   }
 
+  // A volume is remembered when a reading arrives, so whichever came last wins:
+  // Spotify's player state, a discovery sweep that read the speaker, or a
+  // command. Spotify may report no volume for a Sonos; the sweep's reading then
+  // stands in until one arrives.
   function rememberDiscoveredReceiverVolume(device) {
     var receiver = findDiscoveredReceiver(device)
     if (!receiver || String(receiver.brand || "").toLowerCase() !== "sonos")
@@ -1438,15 +1446,11 @@ Item {
     return useRemotePlayback ? "remote" : "local"
   }
 
-  // Returns false when the backend could not take the command, so the caller
-  // keeps it queued and retries. Only Sonos rejects this way.
   function sendVolumeCommand(sliderValue) {
     var localVolume = !useRemotePlayback && hasLocalPlayer
       && activePlayer.volumeSupported
     var normalized = localVolume
       ? Api.sliderToEngineVolume(sliderValue) : sliderValue
-    var sonos = volumeFlushTarget() === "sonos"
-    if (sonos && spotifyConnectManager.controlBusy) return false
     var remoteSerial = 0
     if (!localVolume && useRemotePlayback && remoteDevice) {
       var remotePercent = Math.round(normalized * 100)
@@ -1454,7 +1458,7 @@ Item {
       var receiver = findDiscoveredReceiver(remoteDevice)
       if (receiver) spotifyConnectManager.rememberVolume(receiver.id, remotePercent)
     }
-    if (sendSonosControl("volume", String(Math.round(normalized * 100)))) return true
+    if (sendSonosControl("volume", String(Math.round(normalized * 100)))) return
     if (localVolume)
       activePlayer.volume = normalized
     else apiAction("PUT", "/me/player/volume",
@@ -1466,7 +1470,6 @@ Item {
       }
       if (!ok || !root.volumeLiveActive) root.loadPlaybackState()
     })
-    return true
   }
 
   function flushVolume() {
@@ -1476,7 +1479,8 @@ Item {
     }
     var sliderValue = queuedVolumeSlider
     beginPendingSliderVolume(sliderValue)
-    if (sendVolumeCommand(sliderValue)) volumeFlushQueued = false
+    sendVolumeCommand(sliderValue)
+    volumeFlushQueued = false
     volumeFlushCooling = true
     if (volumeFlushTimer) volumeFlushTimer.restart()
   }
@@ -1504,8 +1508,9 @@ Item {
         localRuntimeDeviceName = device.name
       }
       reconcilePendingRemoteControls(state)
-      if (!rememberDiscoveredReceiverVolume(device))
-        rememberRemoteVolume(device, device.volumePercent)
+      if (!rememberRemoteVolume(device, device.volumePercent)
+          && !remoteVolumeKnown(device))
+        rememberDiscoveredReceiverVolume(device)
     }
     remotePlayback = state
     verifyRadioPlaybackContext()
@@ -3343,12 +3348,8 @@ Item {
   function mergeConnectDevices() {
     var local = spotifyConnectManager.devices || []
     var current = remoteDevice && remoteDevice.active === true ? remoteDevice : null
-    var currentVolume = Api.normalizeVolumePercent(
-      current ? current.volumePercent : null)
-    var localVolumePreferred = current
-      ? rememberDiscoveredReceiverVolume(current) : false
-    if (current && !localVolumePreferred && currentVolume !== null)
-      rememberRemoteVolume(current, currentVolume)
+    if (current && !remoteVolumeKnown(current))
+      rememberDiscoveredReceiverVolume(current)
     var currentMatched = false
     var localById = ({})
     for (var i = 0; i < local.length; i++) localById[String(local[i].id || "")] = local[i]
@@ -3375,10 +3376,9 @@ Item {
         apiDevice.active = apiCurrentMatch
         if (apiCurrentMatch) {
           currentMatched = true
-          // /me/player is the freshest source for the active receiver. The
-          // separately cached device list is only a fallback when that value
-          // is unknown; otherwise it can undo an accepted volume command.
-          if (!localVolumePreferred && currentVolume === null)
+          // The separately cached device list is only a fallback when no
+          // reading is known; otherwise it can undo an accepted volume command.
+          if (!remoteVolumeKnown(current))
             rememberRemoteVolume(current, apiDevice.volumePercent)
           apiDevice.restricted = current.restricted === true
           apiDevice.volumePercent = displayedRemoteVolumePercent(current)
@@ -4046,15 +4046,7 @@ Item {
 
   function sendSonosControl(action, value) {
     if (!sonosControlAvailable || !sonosControlDevice.id) return false
-    if (!spotifyConnectManager.controlling)
-      spotifyConnectManager.control(sonosControlDevice.id, action, value)
-    return true
-  }
-
-  function sonosPlayMode(nextRepeat, nextShuffle) {
-    if (nextRepeat === "track") return "REPEAT_ONE"
-    if (nextShuffle) return nextRepeat === "context" ? "SHUFFLE" : "SHUFFLE_NOREPEAT"
-    return nextRepeat === "context" ? "REPEAT_ALL" : "NORMAL"
+    return spotifyConnectManager.control(sonosControlDevice.id, action, value)
   }
 
   function applySonosControlResult(action, value) {
@@ -4076,10 +4068,11 @@ Item {
         spotifyConnectManager.rememberVolume(sonosControlDevice.id,
           nextDevice.volumePercent)
     } else if (action === "mode") {
-      var mode = String(value || "").toUpperCase()
-      nextState.repeatMode = mode === "REPEAT_ONE" ? "track"
-        : (mode === "REPEAT_ALL" || mode === "SHUFFLE" ? "context" : "off")
-      nextState.shuffle = mode === "SHUFFLE" || mode === "SHUFFLE_NOREPEAT"
+      var mode = Api.sonosPlayModeState(value)
+      if (mode) {
+        nextState.repeatMode = mode.repeatMode
+        nextState.shuffle = mode.shuffle
+      }
     }
     remotePlayback = nextState
     playbackPositionTick++
@@ -4196,7 +4189,7 @@ Item {
   function setShuffle(value) {
     var enabled = value === true
     noteActivity()
-    if (sendSonosControl("mode", sonosPlayMode(repeatMode, enabled))) return
+    if (sendSonosControl("mode", Api.sonosPlayMode(repeatMode, enabled))) return
     if (!useRemotePlayback && hasLocalPlayer && activePlayer.shuffleSupported)
       activePlayer.shuffle = enabled
     else remotePlayerAction("PUT", "/me/player/shuffle",
@@ -4206,7 +4199,7 @@ Item {
   function cycleRepeat() {
     var nextMode = repeatMode === "off" ? "context" : (repeatMode === "context" ? "track" : "off")
     noteActivity()
-    if (sendSonosControl("mode", sonosPlayMode(nextMode, shuffle))) return
+    if (sendSonosControl("mode", Api.sonosPlayMode(nextMode, shuffle))) return
     if (!useRemotePlayback && hasLocalPlayer && activePlayer.loopSupported) {
       activePlayer.loopState = nextMode === "track" ? MprisLoopState.Track
         : (nextMode === "context" ? MprisLoopState.Playlist : MprisLoopState.None)
@@ -4614,6 +4607,7 @@ Item {
   Connections {
     target: spotifyConnectManager
     function onRefreshed() {
+      if (root.remoteDevice) root.rememberDiscoveredReceiverVolume(root.remoteDevice)
       var error = root.pendingDeviceLoadError
       root.pendingDeviceLoadError = ""
       root.finishDeviceLoad(null, error)
