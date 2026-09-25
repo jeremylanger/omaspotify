@@ -401,7 +401,7 @@ Item {
   property string currentUserName: ""
   readonly property string playlistItemsEmptyMessage: Api.playlistItemsEmptyMessage(
     selectedPlaylist, playlistItems.length, playlistItemsError,
-    playlistItemsStatus, currentUserId)
+    playlistItemsStatus, currentUserId, authManager.customClientId === "")
   property var queue: []
   property var devices: []
   property var apiDevices: []

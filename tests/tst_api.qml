@@ -1422,6 +1422,11 @@ TestCase {
     compare(Api.playlistItemsEmptyMessage(own, 0,
       "API rate limit exceeded. Try again in 10 seconds.", 429, "user-1"),
       "Couldn't load this playlist. Try again in a moment.")
+    compare(Api.playlistItemsEmptyMessage(own, 0,
+      "API rate limit exceeded. Try again in 10 seconds.", 429, "user-1", true),
+      Api.sharedClientRateLimitMessage())
+    compare(Api.playlistItemsEmptyMessage(own, 0, "Server error", 500,
+      "user-1", true), "Couldn't load this playlist. Try again in a moment.")
     compare(Api.playlistItemsEmptyMessage(followed, 0, "", 200, ""),
       "This playlist has no visible items.")
   }

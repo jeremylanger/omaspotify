@@ -461,7 +461,12 @@ function playlistItemsHiddenMessage() {
   return "Spotify does not expose the contents of this playlist unless you own or collaborate on it. You can still play it as a Spotify context."
 }
 
-function playlistItemsEmptyMessage(playlist, itemCount, error, status, userId) {
+function sharedClientRateLimitMessage() {
+  return "Spotify is rate-limiting the shared app every OmaSpotify install uses. Set your own Spotify Developer app client ID in Settings to get a quota of your own."
+}
+
+function playlistItemsEmptyMessage(playlist, itemCount, error, status, userId,
+    sharedClient) {
   if (!playlist) return ""
   var count = Number(itemCount) || 0
   var owned = playlistOwnedByUser(playlist, userId)
@@ -470,6 +475,8 @@ function playlistItemsEmptyMessage(playlist, itemCount, error, status, userId) {
   if (error) {
     if (playlistItemsHiddenByApi(status, owned, collaborative, knownUser))
       return playlistItemsHiddenMessage()
+    if (Number(status) === 429 && sharedClient === true)
+      return sharedClientRateLimitMessage()
     return "Couldn't load this playlist. Try again in a moment."
   }
   if (count > 0) return ""
