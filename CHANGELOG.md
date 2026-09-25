@@ -13,6 +13,14 @@
   Sonos app or with the speaker's own buttons, once Spotify passes them on. It
   used to stay at whatever the speaker said when it was last looked for on the
   network.
+- Reloading the shell while OmaSpotify was still starting up no longer throws
+  an error in the shell log. From wtyler2505's upstream
+  [#104](https://github.com/stappmus/Omarchy-Spotify/pull/104).
+- If a downloaded playback backend fails its checksum or signature check,
+  setup now says so and warns against installing it by hand, instead of
+  reporting it the same way as having no network. It still builds from source
+  either way. From robin marin's upstream
+  [#79](https://github.com/stappmus/Omarchy-Spotify/pull/79).
 
 ## 2.0.1
 
