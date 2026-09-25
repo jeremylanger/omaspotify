@@ -4884,6 +4884,9 @@ Item {
     running: false
     command: ["/usr/bin/mkdir", "-p", root.stateDir]
     onExited: {
+      // The mkdir can finish after the service instance is torn down (shell
+      // reload, on-demand deactivation); `root` is null by then.
+      if (!root) return
       if (!root.sessionFileReady) sessionFile.reload()
       else if (root.sessionFileDirty) root.flushSessionFile()
       if (!root.playHistoryReady) playHistoryFile.reload()
