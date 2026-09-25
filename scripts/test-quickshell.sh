@@ -66,3 +66,37 @@ if rg -i 'ReferenceError|TypeError|binding loop|Cannot assign|Unable to assign' 
   exit 1
 fi
 echo 'Quickshell Sonos control test passed.'
+
+mkdir -p "$test_root/local/plugin" "$test_root/local-state" "$test_root/local-runtime/omaspotify"
+cp "$source_root/"*.qml "$source_root/"*.js "$test_root/local/plugin/"
+cp "$source_root/tests/integration/LocalPlayback.qml" "$test_root/local/shell.qml"
+# Stands in for the backend socket, in a private runtime dir so the real
+# backend can never receive the test's load command. Records every request.
+python3 - "$test_root/local-runtime/omaspotify/backend.sock" "$test_root/local-requests" <<'BACKEND' &
+import json, socket, sys
+server = socket.socket(socket.AF_UNIX)
+server.bind(sys.argv[1])
+server.listen(4)
+while True:
+    connection, _ = server.accept()
+    for line in connection.makefile():
+        with open(sys.argv[2], "a") as log:
+            log.write(line)
+        reply = {"type": "response", "id": json.loads(line)["id"], "ok": True, "result": {}}
+        connection.sendall((json.dumps(reply) + "\n").encode())
+BACKEND
+backend_pid=$!
+env QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME=generic NO_AT_BRIDGE=1 XDG_STATE_HOME="$test_root/local-state" \
+  XDG_RUNTIME_DIR="$test_root/local-runtime" \
+  timeout 15s dbus-run-session -- qs --no-color -p "$test_root/local" > "$test_root/local-output" 2>&1 || true
+kill "$backend_pid" 2>/dev/null || true
+rg -q LOCAL_PLAYBACK_SENT "$test_root/local-output" || {
+  cat "$test_root/local-output"
+  exit 1
+}
+rg -q '"command":"load".*"offset_uri":"spotify:track:clicked"' "$test_root/local-requests" || {
+  echo 'The clicked song never reached the backend as the offset to start from:' >&2
+  cat "$test_root/local-requests" >&2
+  exit 1
+}
+echo 'Quickshell local playback test passed.'

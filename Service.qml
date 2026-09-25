@@ -3825,7 +3825,7 @@ Item {
       root.succeed(Api.localSocketFallbackMessage())
       root.sendPendingPlayback(Api.playbackTargetDeviceId(
         root.localDevice() || root.chooseDevice(), root.selectedDeviceExplicit))
-    })
+    }, trackUri)
   }
 
   function playItem(item, sourceItems, contextUri, successMessage, explicitRadio) {
