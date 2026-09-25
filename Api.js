@@ -1386,7 +1386,7 @@ function seekPosition(position, delta, length) {
   return maximum > 0 ? Math.min(maximum, next) : next
 }
 
-function backendLoadFields(body) {
+function backendLoadFields(body, trackUri) {
   var source = body || null
   if (!source || typeof source !== "object") return null
   var fields = { play: true }
@@ -1399,6 +1399,13 @@ function backendLoadFields(body) {
       var index = Math.floor(Number(offset.position))
       if (isFinite(index) && index >= 0) fields.offset_index = index
     }
+    // The Web API body carries only a numeric offset, because some remote
+    // receivers ignore a URI offset. librespot resolves the context itself
+    // and its indexes need not match the rows on screen, so the clicked
+    // track's URI wins locally. The backend prefers offset_uri over the index.
+    var clicked = String(trackUri || "")
+    if (!fields.offset_uri && /^spotify:(track|episode):/.test(clicked))
+      fields.offset_uri = clicked
   } else if (Array.isArray(source.uris) && source.uris.length) {
     var uris = []
     for (var i = 0; i < source.uris.length; i++) {
