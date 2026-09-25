@@ -13,6 +13,14 @@
   Sonos app or with the speaker's own buttons, once Spotify passes them on. It
   used to stay at whatever the speaker said when it was last looked for on the
   network.
+- Clicking a song in a playlist now plays that song. Playing on this computer
+  used to go by the row number alone, which can point at a different song
+  when the playlist has songs that are unavailable. From Fred Nix's
+  [#11](https://github.com/jeremylanger/omaspotify/pull/11).
+- When Spotify is limiting the shared app every install uses, an empty
+  playlist now says so and points to setting up your own app, instead of
+  asking you to try again in a moment. From Fred Nix's
+  [#10](https://github.com/jeremylanger/omaspotify/pull/10).
 - Reloading the shell while OmaSpotify was still starting up no longer throws
   an error in the shell log. From wtyler2505's upstream
   [#104](https://github.com/stappmus/Omarchy-Spotify/pull/104).
