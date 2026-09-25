@@ -64,8 +64,8 @@ Item {
     return id
   }
 
-  function loadPlayback(body, callback) {
-    var fields = Api.backendLoadFields(body)
+  function loadPlayback(body, callback, trackUri) {
+    var fields = Api.backendLoadFields(body, trackUri)
     if (!fields) {
       if (typeof callback === "function")
         callback(false, null, "This Spotify item cannot be played")

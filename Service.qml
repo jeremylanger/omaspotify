@@ -3805,6 +3805,8 @@ Item {
     var body = pendingPlaybackBody
     var successMessage = pendingPlaybackMessage
     var radioPlaylist = pendingPlaybackRadio
+    var trackUri = pendingPlayback && pendingPlayback.uri
+      ? String(pendingPlayback.uri) : ""
     clearPendingPlayback()
     localSocketWaitTimer.stop()
     backendClient.loadPlayback(body, function(ok, result, error) {

@@ -2280,6 +2280,17 @@ TestCase {
       uris: ["spotify:track:one", "spotify:track:two"],
       position_ms: 1500
     }))
+    compare(JSON.stringify(Api.backendLoadFields({
+      context_uri: "spotify:playlist:abc",
+      offset: { position: 3 }
+    }, "spotify:track:clicked")), JSON.stringify({
+      play: true,
+      context_uri: "spotify:playlist:abc",
+      offset_index: 3,
+      offset_uri: "spotify:track:clicked"
+    }))
+    compare(Api.backendLoadFields({ context_uri: "spotify:album:abc" },
+      "spotify:album:abc").offset_uri, undefined)
     compare(Api.backendLoadFields(null), null)
     compare(Api.backendLoadFields({}), null)
   }
