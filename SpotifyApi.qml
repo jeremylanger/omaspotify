@@ -46,10 +46,12 @@ Item {
   property bool restrictInFlight: false
   property bool pumpingRequests: false
   property bool cancellingAll: false
+  property bool expiringRequests: false
   property bool pumpAgain: false
   property var timedJobs: []
   property var diagnostics: []
   property int activeTimeoutMs: 15000
+  property int foregroundTimeoutMs: 10000
   property var xhrFactory: function() { return new XMLHttpRequest() }
   property var now: function() { return Date.now() }
 
@@ -124,31 +126,40 @@ Item {
   }
 
   function expireTimedOutRequests(timestamp) {
+    if (expiringRequests) return
     var current = Number(timestamp)
     if (!isFinite(current)) current = now()
     var jobs = timedJobs.slice()
-    for (var i = 0; i < jobs.length; i++) {
-      var job = jobs[i]
-      if (!job || job.finished === true) continue
-      var deadline = job.deadlineAt || job.activeDeadlineAt
-      if (!deadline || current < deadline) continue
-      var handle = job.handle
-      var xhr = handle ? handle.xhr : null
-      var cooldownMs = Api.apiCooldownMs(current, rateLimitedUntil)
-      var waitingForCooldown = cooldownMs > 0 && requestQueue.indexOf(job) >= 0
-      var error = waitingForCooldown
-        ? Api.rateLimitMessage(String(Math.ceil(cooldownMs / 1000)))
-        : "Spotify took too long to respond. Try again."
-      if (String(job.method || "GET") !== "GET" && job.sentAt)
-        error = "Spotify did not confirm this action. Check playback or your collection before retrying."
-      if (markJobFinished(job) !== true) continue
-      if (handle) {
-        handle.xhr = null
-        handle.aborted = true
-        removeQueuedHandle(handle)
+    var expired = false
+    expiringRequests = true
+    try {
+      for (var i = 0; i < jobs.length; i++) {
+        var job = jobs[i]
+        if (!job || job.finished === true) continue
+        var deadline = job.deadlineAt || job.activeDeadlineAt
+        if (!deadline || current < deadline) continue
+        var handle = job.handle
+        var xhr = handle ? handle.xhr : null
+        var cooldownMs = Api.apiCooldownMs(current, rateLimitedUntil)
+        var waitingForCooldown = cooldownMs > 0 && requestQueue.indexOf(job) >= 0
+        var error = waitingForCooldown
+          ? Api.rateLimitMessage(String(Math.ceil(cooldownMs / 1000)))
+          : "Spotify took too long to respond. Try again."
+        if (String(job.method || "GET") !== "GET" && job.sentAt)
+          error = "Spotify did not confirm this action. Check playback or your collection before retrying."
+        if (markJobFinished(job) !== true) continue
+        expired = true
+        if (handle) {
+          handle.xhr = null
+          handle.aborted = true
+          removeQueuedHandle(handle)
+        }
+        abortXhr(xhr)
+        deliverJob(job, 0, null, error, null)
       }
-      abortXhr(xhr)
-      deliverJob(job, 0, null, error, null)
+    } finally {
+      expiringRequests = false
+      if (expired) pumpRequests()
     }
   }
 
@@ -198,7 +209,7 @@ Item {
   }
 
   function pumpRequests() {
-    if (cancellingAll) return
+    if (cancellingAll || expiringRequests) return
     if (pumpingRequests) {
       pumpAgain = true
       return
@@ -214,6 +225,10 @@ Item {
         && backgroundInFlight < Api.backgroundInFlightLimit(limit)
       var taken = Api.dequeueApiJob(requestQueue, allowBackground)
       var job = taken.job
+      if (job && job.deadlineAt > 0 && now() >= job.deadlineAt) {
+        expireTimedOutRequests(now())
+        continue
+      }
       // The pause that applies to this job, which for a page someone opened is
       // only ever its own refusals.
       var jobCooldown = Api.jobCooldownMs(job, now(), rateLimitedUntil,
@@ -322,12 +337,14 @@ Item {
                 job.rateLimitRetries)
             console.warn("Spotify API rate limited on "
               + String(job.method || "GET") + " " + Api.redact(String(job.path || ""))
-              + "; pausing every request for "
+              + "; cooldown now "
               + Api.apiCooldownMs(now(), rateLimitedUntil) + " ms"
               + " (retry " + job.rateLimitRetries
               + ", background gap now " + backgroundSpacingMs + " ms)")
             if (job.retryRateLimit !== false
-                && Api.shouldRetryRateLimit(job.rateLimitRetries)) {
+                && Api.shouldRetryRateLimit(job.rateLimitRetries)
+                && (!job.deadlineAt || now() + Api.jobCooldownMs(job, now(),
+                  rateLimitedUntil, interactiveLimitedUntil) < job.deadlineAt)) {
               job.activeDeadlineAt = 0
               job.rateLimitRetries += 1
               requestQueue = Api.enqueueApiJob(requestQueue, job)
@@ -380,7 +397,12 @@ Item {
   function request(method, path, query, body, callback, options) {
     var settings = options || ({})
     var handle = { aborted: false, xhr: null, job: null }
-    var timeoutMs = Math.max(0, Number(settings.timeoutMs) || 0)
+    var requestedTimeout = Number(settings.timeoutMs)
+    var background = String(settings.priority || "") === "background"
+      && !Api.apiRequestIsMutating(method)
+    var timeoutMs = settings.timeoutMs === undefined
+      ? (background ? 0 : foregroundTimeoutMs)
+      : Math.max(0, isFinite(requestedTimeout) ? requestedTimeout : 0)
     var queuedAt = now()
     var job = {
       method: method,

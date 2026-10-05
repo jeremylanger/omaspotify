@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Foreground requests stop waiting after ten seconds in total, including queue
+  waits and retries. Longer quota refusals report immediately rather than
+  leaving pages loading for minutes; background library reads keep their
+  cooldowns. Expired queued playback actions are cancelled before dispatch.
 - On a Sonos, shuffle and repeat-one can now be on together. Turning shuffle
   on during repeat-one did nothing, and switching repeat to repeat-one turned
   shuffle off.

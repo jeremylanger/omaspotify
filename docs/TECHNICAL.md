@@ -85,6 +85,15 @@ after being refused itself it waits its turn. Every request logs where its time
 went — queueing, token refresh, or the network — which is what makes a slow call
 diagnosable at all. See `docs/LIBRARY-DATA.md` for the measurements.
 
+Foreground requests have a ten-second total deadline, including time in the
+queue, token refresh, HTTP retries and catalog fallback. A 429 whose cooldown
+cannot fit the remaining deadline reports the refusal immediately. Background
+reads retain their paced cooldown waits and fifteen-second active watchdog.
+Callers can set a different `timeoutMs`, including zero to opt out of the total
+deadline. Expired queued actions are removed before a slot can dispatch them;
+timing out an already-sent action reports its uncertain outcome rather than
+claiming the action failed.
+
 ## Runtime requirements
 
 - Omarchy 4 with the Quickshell shell enabled

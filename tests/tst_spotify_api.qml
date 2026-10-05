@@ -423,11 +423,13 @@ TestCase {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
     var callbacks = 0
-    api.request("GET", "/me", null, null, function() { callbacks++ })
+    api.request("GET", "/me", null, null, function() { callbacks++ },
+      { timeoutMs: 0 })
     requests[0].retryAfter = "120"
     complete(requests[0], 429)
     compare(api.rateLimitedUntil, 121400)
-    api.request("GET", "/me/albums", null, null, function() { callbacks++ })
+    api.request("GET", "/me/albums", null, null, function() { callbacks++ },
+      { timeoutMs: 0 })
 
     clock = 31000
     api.pumpRequests()
@@ -451,7 +453,7 @@ TestCase {
   function test_cooldownLongerThanTimerRangeRechecksWithoutDispatchingEarly() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
-    api.request("GET", "/me", null, null, function() {})
+    api.request("GET", "/me", null, null, function() {}, { timeoutMs: 0 })
     requests[0].retryAfter = "3000000"
     complete(requests[0], 429)
     var deadline = 3000001400
@@ -593,6 +595,123 @@ TestCase {
     verify(requests[0].aborted)
   }
 
+  function test_defaultDeadlineIncludesForegroundQueueWait() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.rateLimitedUntil = 121000
+    var calls = 0
+    var error = ""
+    api.request("GET", "/me/playlists", null, null, function(status, payload, reason) {
+      calls++
+      error = reason
+    })
+    clock = 11000
+    api.expireTimedOutRequests(clock)
+    compare(calls, 1)
+    verify(error.indexOf("Spotify is busy") >= 0)
+    compare(requests.length, 0)
+    compare(api.requestQueue.length, 0)
+    clock = 121000
+    api.pumpRequests()
+    compare(requests.length, 0, "the expired page stays cancelled")
+  }
+
+  function test_expiredQueuedActionNeverDispatchesWhenSlotOpens() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var limit = fillEverySlot(api)
+    var calls = 0
+    api.request("PUT", "/me/player/pause", null, null, function() { calls++ },
+      { timeoutMs: 1000 })
+    clock = 2000
+    complete(requests[0], 200)
+    compare(requests.length, limit, "slot release must not send an expired action")
+    compare(calls, 1)
+    compare(api.requestQueue.length, 0)
+  }
+
+  function test_timeoutBatchCancelsQueuedActionsBeforeReleasingSlots() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var limit = Api.apiInFlightLimit(false)
+    var calls = 0
+    for (var i = 0; i < limit; i++)
+      api.request("GET", "/me", null, null, function() { calls++ },
+        { timeoutMs: 1000 })
+    api.request("PUT", "/me/player/pause", null, null, function() { calls++ },
+      { timeoutMs: 1000 })
+    clock = 2000
+    api.expireTimedOutRequests(clock)
+    compare(requests.length, limit, "the watchdog cannot dispatch a stale action")
+    compare(calls, limit + 1)
+    compare(api.requestsInFlight, 0)
+    compare(api.requestQueue.length, 0)
+  }
+
+  function test_timeoutCallbacksCanQueueFreshWorkAfterBatch() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var calls = 0
+    api.request("GET", "/me", null, null, function() {
+      calls++
+      api.request("GET", "/me/albums", null, null, function() { calls++ })
+    }, { timeoutMs: 1000 })
+    api.request("GET", "/me/player", null, null, function() { calls++ },
+      { timeoutMs: 1000 })
+    clock = 2000
+    api.expireTimedOutRequests(clock)
+    compare(calls, 2)
+    compare(requests.length, 3)
+    compare(api.requestsInFlight, 1)
+    complete(requests[2], 200)
+    compare(calls, 3)
+    compare(api.requestsInFlight, 0)
+  }
+
+  function test_foregroundRetryThatCannotMeetDeadlineReportsQuotaNow() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var calls = 0
+    var error = ""
+    api.request("GET", "/me/playlists", null, null, function(status, payload, reason) {
+      calls++
+      error = reason
+    }, { priority: "interactive" })
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    compare(calls, 1)
+    verify(error.indexOf("120 seconds") >= 0)
+    compare(api.requestQueue.length, 0)
+    clock = 121000
+    api.pumpRequests()
+    compare(requests.length, 1)
+  }
+
+  function test_shortForegroundRetryStillFitsDefaultDeadline() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var calls = 0
+    api.request("GET", "/me/playlists", null, null, function() { calls++ })
+    complete(requests[0], 429)
+    compare(calls, 0)
+    clock = api.rateLimitedUntil
+    api.pumpRequests()
+    compare(requests.length, 2)
+    complete(requests[1], 200)
+    compare(calls, 1)
+  }
+
+  function test_backgroundRetryCanWaitPastForegroundBudget() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var calls = 0
+    api.request("GET", "/me/tracks", null, null, function() { calls++ },
+      { priority: "background" })
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    clock = 11000
+    api.expireTimedOutRequests(clock)
+    compare(calls, 0)
+    clock = api.rateLimitedUntil
+    api.pumpRequests()
+    compare(requests.length, 2)
+    complete(requests[1], 200)
+    compare(calls, 1)
+  }
+
   function test_queuedRateLimitRetryCanTimeOutDuringCooldown() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
@@ -666,7 +785,8 @@ TestCase {
     var api = createTemporaryObject(apiComponent, testCase)
     api.rateLimitedUntil = 121000
     var calls = 0
-    api.request("GET", "/me", null, null, function() { calls++ })
+    api.request("GET", "/me", null, null, function() { calls++ },
+      { priority: "background" })
     clock = 120000
     api.expireTimedOutRequests(clock)
     compare(calls, 0)
