@@ -647,6 +647,64 @@ TestCase {
     verify(line.indexOf("abc123") < 0)
   }
 
+  // Two transports log into one stream; a refusal has to name the app it cost.
+  function test_requestTimingLine_endsWithTheAppThatPaid() {
+    var line = Api.requestTimingLine("GET", "/playlists/abc", { wireMs: 40 },
+      { priority: "background", app: "catalog" })
+    verify(line.indexOf("background catalog") >= 0, line)
+    var unnamed = Api.requestTimingLine("GET", "/me", ({}), ({}))
+    verify(unnamed.indexOf("normal") === unnamed.length - "normal".length,
+      "no app leaves the line as it was")
+  }
+
+  // Spotify's spent daily quota looks like a rate limit on the wire, apart from
+  // the reason in the body.
+  function test_quotaExceededPayload_readsTheReason() {
+    verify(Api.quotaExceededPayload({ error: { status: 429, reason: "QUOTA_EXCEEDED" } }))
+    verify(!Api.quotaExceededPayload({ error: { status: 429, message: "Too many requests" } }))
+    verify(!Api.quotaExceededPayload(null))
+    verify(!Api.quotaExceededPayload("QUOTA_EXCEEDED"))
+  }
+
+  // The local player answers playlist reads; everything else keeps its route.
+  function test_backendPlaylistRead_namesThePageTheLocalPlayerShouldAnswer() {
+    var version = Api.backendPlaylistRead("GET", "/playlists/abc", { fields: "snapshot_id,images" })
+    compare(version.uri, "spotify:playlist:abc")
+    compare(version.items, false)
+    compare(version.limit, 0, "a version check asks for no rows")
+    var first = Api.backendPlaylistRead("GET", "/playlists/abc/items", { limit: 50 })
+    compare(first.items, true); compare(first.offset, 0); compare(first.limit, 50)
+    var cursor = Api.backendPlaylistRead("GET",
+      "https://api.spotify.com/v1/playlists/abc/items?offset=100&limit=100", null)
+    compare(cursor.id, "abc"); compare(cursor.offset, 100); compare(cursor.limit, 100)
+    var relative = Api.backendPlaylistRead("GET", "/playlists/abc/items?offset=250&limit=50", null)
+    compare(relative.offset, 250); compare(relative.limit, 50)
+    compare(Api.backendPlaylistRead("GET", "/me/playlists", null), null)
+    compare(Api.backendPlaylistRead("POST", "/playlists/abc/items", null), null)
+    compare(Api.backendPlaylistRead("GET", "/playlists/abc/followers", null), null)
+  }
+
+  function test_backendPlaylistPayload_looksLikeTheWebApiAnswer() {
+    var read = Api.backendPlaylistRead("GET", "/playlists/abc/items", { limit: 100 })
+    var page = Api.backendPlaylistPayload(read, { snapshot_id: "v9", total: 250, offset: 0,
+      limit: 100, items: [{ added_at: "", item: null }], next: 100 })
+    compare(page.items.length, 1); compare(page.total, 250)
+    compare(page.next, "/playlists/abc/items?offset=100&limit=100",
+      "the cursor is the Web API path for the same rows, so it survives the player going away")
+    var last = Api.backendPlaylistPayload(read, { items: [], total: 250, offset: 200, limit: 50, next: null })
+    compare(last.next, null)
+    var version = Api.backendPlaylistPayload(Api.backendPlaylistRead("GET", "/playlists/abc", null),
+      { snapshot_id: "v9", name: "Focus", total: 250, images: [{ url: "u", width: 640, height: 640 }] })
+    compare(version.snapshot_id, "v9"); compare(version.type, "playlist"); compare(version.id, "abc")
+    compare(Api.imageFor(version.images, 256), "u")
+    compare(version.items.total, 250)
+  }
+
+  function test_resumeCandidateFreshness_isMinutesNotSeconds() {
+    verify(Api.RESUME_CANDIDATE_FRESH_MS >= 600000,
+      "an idle panel polling every fifteen seconds must not refetch the last play each time")
+  }
+
   // The sidebar mixes four kinds of thing, so it can be narrowed to one.
   function test_libraryTypeFilter_narrowsToOneKind() {
     var rows = [
@@ -1421,14 +1479,35 @@ TestCase {
       Api.playlistItemsHiddenMessage())
     compare(Api.playlistItemsEmptyMessage(own, 0,
       "API rate limit exceeded. Try again in 10 seconds.", 429, "user-1"),
-      "Couldn't load this playlist. Try again in a moment.")
+      "API rate limit exceeded. Try again in 10 seconds.")
     compare(Api.playlistItemsEmptyMessage(own, 0,
       "API rate limit exceeded. Try again in 10 seconds.", 429, "user-1", true),
       Api.sharedClientRateLimitMessage())
     compare(Api.playlistItemsEmptyMessage(own, 0, "Server error", 500,
-      "user-1", true), "Couldn't load this playlist. Try again in a moment.")
+      "user-1", true), "Server error")
     compare(Api.playlistItemsEmptyMessage(followed, 0, "", 200, ""),
       "This playlist has no visible items.")
+  }
+
+  function test_playlistReadRoute_requiresKnownForeignPlaylistAndReadPath() {
+    compare(Api.playlistReadId("GET", "/playlists/foreign/items"), "foreign")
+    compare(Api.playlistReadId("GET", Api.API_BASE + "/playlists/foreign/items?offset=50"), "foreign")
+    compare(Api.playlistReadId("GET", "/playlists/foreign"), "foreign")
+    compare(Api.playlistReadId("GET", "/me/playlists"), "")
+    compare(Api.playlistReadId("POST", "/playlists/foreign/items"), "")
+    compare(Api.playlistReadId("GET", "https://elsewhere.test/playlists/foreign/items"), "")
+    verify(Api.playlistNeedsCatalogRead({ ownerId: "other" }, "me"))
+    verify(!Api.playlistNeedsCatalogRead({ ownerId: "me" }, "me"))
+    verify(!Api.playlistNeedsCatalogRead({ ownerId: "other", collaborative: true }, "me"))
+    verify(!Api.playlistNeedsCatalogRead({ ownerId: "other" }, ""))
+    verify(!Api.playlistNeedsCatalogRead({}, "me"))
+  }
+
+  function test_playlistFailure_exposesQuotaReasonWithoutSecrets() {
+    var quota = "Spotify refused this request because the developer quota for this app is used up. It stays refused until Spotify resets that quota."
+    compare(Api.playlistItemsEmptyMessage({ ownerId: "me" }, 0, quota, 429, "me"), quota)
+    compare(Api.playlistItemsEmptyMessage({ ownerId: "other" }, 0, quota, 429, "me"), quota)
+    compare(Api.playlistItemsEmptyMessage({ ownerId: "me" }, 0, "access_token=secret", 500, "me"), "access_token=<redacted>")
   }
 
   function test_responsiveMediaRowsAndSearchColumnsUseMeasuredWidth() {

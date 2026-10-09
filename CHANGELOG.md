@@ -2,6 +2,96 @@
 
 ## Unreleased
 
+- The backend names the device that holds the account's Connect session.
+  Spotify allows one active device per account, and librespot logs only
+  "device became inactive" when another one takes it; the backend now follows
+  the same cluster stream, logs "Connect session: Kitchen (speaker, Sonos
+  One)" whenever the holder changes, and publishes it as `session_holder` in
+  the state snapshot (`this computer`, the other device, or omitted while no
+  device is active). A song that stops is then never a mystery.
+
+- Playlists are read through the local player while it runs. The backend
+  gained a `playlist_items` command that lists a playlist through its Connect
+  session and describes the songs with one batched metadata request per
+  hundred rows, answered off the connection's command path so pause and play
+  are never held behind it. The result uses the Web API's own row shape and
+  the Web API spelling of the playlist version, so opened pages, version
+  checks, Load More, cached cursors and idle warming all take it without a
+  second codec, and fall back to the Web API with the caller's original
+  routing when the player is off or refuses a list. This reaches the
+  playlists a personal Web API app is answered 403 for and spends no developer
+  quota. A receiver set never to sleep is started when the panel opens and
+  when idle warming can run, so the whole library caches locally; while it
+  runs, idle warming sets aside the week-long refusals and quota pauses it
+  remembered from the Web API, since those are the lists it now reads.
+
+- Idle warming spends far less of a personal app's daily quota. A held list
+  is compared with Spotify once a day instead of once an hour (the library
+  listing still triggers a check as soon as it names a different version, and
+  an opened list still checks itself after five minutes). A list the app may
+  not read (403, or an empty answer for a list you neither own nor collaborate
+  on) is left alone for a week instead of being asked about every hour, and
+  that is remembered across restarts in the checks file. A `QUOTA_EXCEEDED`
+  refusal pauses warming for six hours when Spotify names no `Retry-After`.
+  Together these were about 250 requests an hour on a 119-playlist library.
+  The idle resume candidate (the song Play continues with when nothing is
+  loaded) is refreshed when a play ends and at most every fifteen minutes
+  otherwise, instead of on every status poll that found nothing playing, which
+  was 900 requests a day from an open panel. Every logged request line now ends
+  with the app that sent it (`personal` or `catalog`), and a quota refusal's
+  message carries Spotify's `Retry-After` when there is one.
+
+- Opened foreign playlists use the already-authorized catalog app directly
+  when a personal app is configured. A personal app's exhausted playlist quota
+  no longer blocks a catalog read the shared app can complete. Owned and
+  collaborative playlists, account library reads and edits keep their existing
+  app; idle warming never switches to the shared app. Track radio and "make
+  this playlist your own" read foreign playlists the same way, while the copy is
+  still written by the personal app. Playlist failures display the actual
+  redacted error instead of generic advice to try again soon. Idle warming
+  waits out a refusal's full `Retry-After`, so a long developer-quota refusal no
+  longer gets retried every five minutes.
+
+- Starting a song on the displayed active receiver no longer waits for an
+  unrelated playback-status refresh. Initial device discovery still waits for
+  its own short refresh, bounded to two seconds without rate-limit retries,
+  and reports a failure instead of playing on this computer. A running local
+  receiver that Spotify has registered also uses Connect immediately if its
+  socket is unavailable, rather than waiting a fixed five seconds first. While
+  that receiver reconnects its session, the newest song waits for it instead.
+
+- Optional idle playlist caching fills first pages across the library before
+  paging deeper, persists progress, and checks Spotify versions to skip unchanged
+  song lists. A separate bounded cache keeps these rows ready for playlist and
+  detail pages. Warming pauses for browsing, edits and rate limits and never
+  falls back from a personal app to the shared app. Open Playlists → Cache.
+  Rows are stored compactly, so 32 MiB holds about 40,000 to 50,000 songs, and
+  confirming an unchanged playlist no longer rewrites the song file. After a
+  restart it finds your account without the panel being opened. Off keeps saved
+  rows readable but adds and updates nothing. Playlists whose songs Spotify
+  hides keep their explanation instead of being cached as empty.
+
+- While Spotify is limiting requests, a page you open now loads or says
+  Spotify is busy within 15 seconds. It used to sit on Loading for minutes
+  behind the library refresh. When Spotify asks for a wait longer than that,
+  the page says so at once. After a refusal, the background library refresh
+  pauses for at least a minute instead of retrying. It keeps the library you
+  already had and no longer replaces the status of your last action. A Play
+  pressed during a long wait can no longer go off after it has timed out.
+- With your own Spotify developer app set up, its requests no longer wait out
+  refusals aimed at the shared app every install uses, and the other way
+  round. Each app keeps its own queue and cooldown. Changing the Client ID in
+  Settings takes effect without restarting the shell, and the new app no
+  longer inherits the previous app's wait.
+- An optional guide to setting up your own Spotify developer app is now
+  offered on the login page, in Settings, and when the shared app runs out of
+  quota. It links to the developer dashboard, copies the exact redirect URI,
+  checks the Client ID before saving it, and starts authorization. It never
+  asks for the Client Secret, and the shared app keeps working if you skip it.
+- A playlist you have opened is drawn at once when you open it again. After
+  five minutes, a small check asks Spotify whether it changed, and its songs
+  are only downloaded again if it did. If the check fails, the rows you had
+  stay on screen.
 - On a Sonos, shuffle and repeat-one can now be on together. Turning shuffle
   on during repeat-one did nothing, and switching repeat to repeat-one turned
   shuffle off.

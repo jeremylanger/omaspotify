@@ -47,7 +47,8 @@
       "showArtwork": "On",
       "normalizeVolume": "On",
       "volumeLevel": "Normal",
-      "clientId": ""
+      "clientId": "",
+      "cachePlaylistsOnIdle": "Off"
     },
     "schema": [
       {
@@ -238,12 +239,22 @@
         "description": "How loud normalized playback aims to be. Takes effect the next time playback starts."
       },
       {
+        "key": "cachePlaylistsOnIdle",
+        "type": "enum",
+        "label": "Cache playlist songs while idle",
+        "options": [
+          "Off",
+          "On"
+        ],
+        "defaultValue": "Off",
+        "description": "Slowly cache accessible song lists while the panel is closed. Compare versions and resume after restart. Room for about 40,000 to 50,000 songs (32 MiB, 512 playlists); no audio downloads. Off keeps saved lists readable but adds nothing."
+      },
+      {
         "key": "clientId",
         "type": "string",
         "label": "Spotify Developer app client ID",
         "defaultValue": "",
         "description": "Optional personal Spotify Developer app client ID, with its own quota. Empty keeps the plugin's client. A valid 32-hex ID is required. Changing it clears the current session and requires authorization for your app."
-
       }
     ]
   }

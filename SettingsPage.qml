@@ -284,6 +284,12 @@ Item {
           }
 
           Button {
+            text: "Setup guide"
+            foreground: page.panel.foreground
+            onClicked: page.panel.openClientSetup()
+          }
+
+          Button {
             text: "Apply app"
             foreground: page.panel.foreground
             enabled: page.panel.service

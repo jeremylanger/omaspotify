@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
     net::{UnixListener, UnixStream},
-    sync::{Semaphore, watch},
+    sync::{Semaphore, mpsc, watch},
 };
 
 /// The largest single request we will buffer. A load command carries a list of
@@ -85,10 +85,16 @@ impl std::fmt::Display for FrameError {
 }
 
 use crate::{
+    catalog::Catalog,
     engine::{EngineSender, send_with_reply},
-    protocol::{PROTOCOL_VERSION, ProtocolError, Request, ServerMessage},
+    protocol::{Command, PROTOCOL_VERSION, ProtocolError, Request, ServerMessage},
     state::StateStore,
 };
+
+/// Finished catalog answers waiting for a client's writer. A playlist page
+/// is fetched off the client loop, so a pause sent meanwhile is not held
+/// behind Spotify; the loop writes whichever is ready first.
+const PENDING_REPLIES: usize = 16;
 
 pub struct SocketGuard {
     path: PathBuf,
@@ -104,6 +110,7 @@ pub async fn serve(
     path: PathBuf,
     state: StateStore,
     commands: EngineSender,
+    catalog: Catalog,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<SocketGuard> {
     let parent = path
@@ -136,6 +143,7 @@ pub async fn serve(
                                     stream,
                                     state.clone(),
                                     commands.clone(),
+                                    catalog.clone(),
                                     permit,
                                 ));
                             }
@@ -167,18 +175,25 @@ async fn handle_client(
     stream: UnixStream,
     state: StateStore,
     commands: EngineSender,
+    catalog: Catalog,
     permit: tokio::sync::OwnedSemaphorePermit,
 ) {
-    if let Err(error) = client_loop(stream, state, commands).await {
+    if let Err(error) = client_loop(stream, state, commands, catalog).await {
         log::debug!("backend client disconnected: {error}");
     }
     drop(permit);
 }
 
-async fn client_loop(stream: UnixStream, state: StateStore, commands: EngineSender) -> Result<()> {
+async fn client_loop(
+    stream: UnixStream,
+    state: StateStore,
+    commands: EngineSender,
+    catalog: Catalog,
+) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BoundedLines::new(reader);
     let mut states = state.subscribe();
+    let (replies, mut finished) = mpsc::channel::<Vec<u8>>(PENDING_REPLIES);
     let initial = state.with(|snapshot| {
         encode_message(&ServerMessage::Event {
             v: PROTOCOL_VERSION,
@@ -208,8 +223,33 @@ async fn client_loop(stream: UnixStream, state: StateStore, commands: EngineSend
                     }
                     Err(FrameError::Io(error)) => return Err(error.into()),
                 };
-                let message = handle_line(&line, &state, &commands).await;
+                let request = match parse_line(&line) {
+                    Ok(request) => request,
+                    Err(refusal) => {
+                        write_message(&mut writer, &refusal).await?;
+                        continue;
+                    }
+                };
+                if let Command::PlaylistItems { uri, offset, limit } = request.command {
+                    let catalog = catalog.clone();
+                    let replies = replies.clone();
+                    let id = request.id;
+                    tokio::spawn(async move {
+                        let message = match catalog.playlist_items(&uri, offset, limit).await {
+                            Ok(value) => ServerMessage::success(id, value),
+                            Err(error) => ServerMessage::failure(id, error),
+                        };
+                        if let Ok(encoded) = encode_message(&message) {
+                            let _ = replies.send(encoded).await;
+                        }
+                    });
+                    continue;
+                }
+                let message = answer(request, &state, &commands).await;
                 write_message(&mut writer, &message).await?;
+            }
+            Some(encoded) = finished.recv() => {
+                write_encoded(&mut writer, &encoded).await?;
             }
             changed = states.changed() => {
                 if changed.is_err() { break; }
@@ -228,22 +268,19 @@ async fn client_loop(stream: UnixStream, state: StateStore, commands: EngineSend
     Ok(())
 }
 
-async fn handle_line<'a>(
-    line: &str,
-    state: &StateStore,
-    commands: &EngineSender,
-) -> ServerMessage<'a> {
+/// A request the server will act on, or the refusal to write back instead.
+fn parse_line<'a>(line: &str) -> Result<Request, ServerMessage<'a>> {
     let request: Request = match serde_json::from_str(line) {
         Ok(request) => request,
         Err(error) => {
-            return ServerMessage::failure(
+            return Err(ServerMessage::failure(
                 0,
                 ProtocolError::new("invalid_request", format!("invalid JSON request: {error}")),
-            );
+            ));
         }
     };
     if request.v != PROTOCOL_VERSION {
-        return ServerMessage::failure(
+        return Err(ServerMessage::failure(
             request.id,
             ProtocolError::new(
                 "unsupported_version",
@@ -252,9 +289,16 @@ async fn handle_line<'a>(
                     request.v, PROTOCOL_VERSION
                 ),
             ),
-        );
+        ));
     }
+    Ok(request)
+}
 
+async fn answer<'a>(
+    request: Request,
+    state: &StateStore,
+    commands: &EngineSender,
+) -> ServerMessage<'a> {
     let result = match request.command {
         crate::protocol::Command::Hello => Ok(serde_json::json!({
             "protocol_version": PROTOCOL_VERSION,

@@ -134,7 +134,7 @@ Item {
     && artistSearchText.trim() !== ""
   readonly property bool shortcutsBlocked: mediaContextMenu.opened
     || playlistPicker.opened || createPlaylistPopup.opened || sleepPopup.opened
-    || shortcutHelpPopup.opened || lyricsInstallPopup.opened
+    || shortcutHelpPopup.opened || lyricsInstallPopup.opened || clientSetupPopup.opened || playlistCachePopup.opened
   readonly property bool shortcutHintsEnabled: service
     ? service.shortcutHintsEnabled : true
   readonly property bool typingInField: {
@@ -347,7 +347,12 @@ Item {
     mediaContextMenu.open()
   }
 
+  function openClientSetup() { clientSetupPopup.open() }
+  function openPlaylistCache() { playlistCachePopup.open() }
+
   function dismissTransientPopup() {
+    if (playlistCachePopup.opened) { playlistCachePopup.close(); return true }
+    if (clientSetupPopup.opened) { clientSetupPopup.close(); return true }
     if (lyricsInstallPopup.opened && (!service || !service.lyricsPluginBusy)) {
       lyricsInstallPopup.close()
       return true
@@ -1534,7 +1539,7 @@ Item {
       return handleContextMenuKey(event)
 
     if (createPlaylistPopup.opened || playlistPicker.opened
-        || shortcutHelpPopup.opened || lyricsInstallPopup.opened)
+        || shortcutHelpPopup.opened || lyricsInstallPopup.opened || clientSetupPopup.opened || playlistCachePopup.opened)
       return false
 
     if (unifiedSearchField.activeFocus && tabbing) {
@@ -2356,6 +2361,9 @@ Item {
       service.cancelSearch(false)
     }
   }
+
+  ClientSetupPopup { id: clientSetupPopup; panel: root }
+  PlaylistCachePopup { id: playlistCachePopup; panel: root }
 
   ShortcutHelpPopup {
     id: shortcutHelpPopup
@@ -3338,7 +3346,7 @@ Item {
               anchors.right: parent.right
               anchors.top: pageHeader.bottom
               anchors.topMargin: visible ? Style.space(6) : 0
-              implicitHeight: visible ? messageText.implicitHeight + Style.space(12) : 0
+              implicitHeight: visible ? Math.max(messageText.implicitHeight, clientSetupAction.visible ? clientSetupAction.implicitHeight : 0) + Style.space(12) : 0
               height: implicitHeight
               visible: root.service && (root.service.lastError !== "" || root.service.statusMessage !== "")
               color: root.service && root.service.lastError !== ""
@@ -3352,11 +3360,25 @@ Item {
                 id: messageText
                 anchors.fill: parent
                 anchors.margins: Style.space(6)
+                anchors.rightMargin: clientSetupAction.visible
+                  ? clientSetupAction.width + Style.space(16) : Style.space(6)
                 text: !root.service ? "" : (root.service.lastError || root.service.statusMessage)
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
+              }
+              Button {
+                id: clientSetupAction
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Use your own app?"
+                foreground: root.foreground
+                visible: root.service && !root.service.usingPersonalClientId
+                  && (root.service.lastError.indexOf("Spotify is busy") >= 0
+                    || root.service.lastError.indexOf("quota") >= 0)
+                onClicked: root.openClientSetup()
               }
             }
 

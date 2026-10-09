@@ -52,6 +52,15 @@ pub enum Command {
     AddToQueue {
         uri: String,
     },
+    /// One page of a playlist's rows, read through the Connect session
+    /// instead of the Web API. A limit of 0 returns the version and length.
+    PlaylistItems {
+        uri: String,
+        #[serde(default)]
+        offset: u32,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
 }
 
 const fn default_true() -> bool {
@@ -117,6 +126,10 @@ pub struct BackendState {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub error_code: String,
     pub error: String,
+    /// Who holds the account's Connect session, as a person would name it:
+    /// "this computer", another device's name and kind, or empty for nobody.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub session_holder: String,
     #[serde(skip)]
     pub seek_sequence: u64,
 }
@@ -140,6 +153,7 @@ impl Default for BackendState {
             generation: 0,
             error_code: String::new(),
             error: String::new(),
+            session_holder: String::new(),
             seek_sequence: 0,
         }
     }

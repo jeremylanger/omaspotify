@@ -1,3 +1,5 @@
+mod catalog;
+mod cluster;
 mod config;
 mod engine;
 mod fade;
@@ -122,6 +124,7 @@ async fn run(config: BackendConfig, socket_path: PathBuf) -> Result<()> {
         socket_path.clone(),
         state.clone(),
         runtime.commands.clone(),
+        catalog::Catalog::new(runtime.session.clone()),
         shutdown_rx.clone(),
     )
     .await?;

@@ -61,6 +61,7 @@ Item {
 
         Text {
           width: Math.max(40, parent.width
+            - playlistCacheButton.width - parent.spacing
             - (playPlaylist.visible ? playPlaylist.width + parent.spacing : 0)
             - (playlistMoreActions.visible
               ? playlistMoreActions.width + parent.spacing : 0))
@@ -71,6 +72,14 @@ Item {
           font.pixelSize: Style.font.subtitle
           font.bold: true
           elide: Text.ElideRight
+        }
+
+        Button {
+          id: playlistCacheButton
+          text: "Cache"
+          foreground: page.panel.foreground
+          tooltipText: "Keep playlist songs ready while idle"
+          onClicked: page.panel.openPlaylistCache()
         }
 
         Button {

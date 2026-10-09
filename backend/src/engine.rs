@@ -53,6 +53,8 @@ pub type EngineSender = mpsc::Sender<EngineRequest>;
 
 pub struct EngineRuntime {
     pub commands: EngineSender,
+    /// The session catalog reads go through; replaced on every reconnect.
+    pub session: watch::Receiver<Session>,
     shutdown: watch::Sender<bool>,
     done: oneshot::Receiver<Result<()>>,
 }
@@ -133,6 +135,12 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
 
     let (commands, command_rx) = mpsc::channel(ENGINE_QUEUE_CAPACITY);
     let (current_spirc_tx, current_spirc_rx) = watch::channel(Some(Arc::clone(&spirc)));
+    // Catalog reads borrow whichever session is current; a reconnect swaps it.
+    let (current_session_tx, current_session_rx) = watch::channel(session.clone());
+    tokio::spawn(crate::cluster::watch(
+        current_session_rx.clone(),
+        state.clone(),
+    ));
     let (track_list_tx, track_list_rx) = watch::channel(Vec::new());
     tokio::spawn(run_commands(
         command_rx,
@@ -159,6 +167,7 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
             spirc,
             spirc_task,
             current_spirc_tx,
+            current_session_tx,
             track_list_rx,
             state,
             shutdown_rx,
@@ -169,6 +178,7 @@ pub async fn start(config: BackendConfig, state: StateStore) -> Result<EngineRun
 
     Ok(EngineRuntime {
         commands,
+        session: current_session_rx,
         shutdown,
         done,
     })
@@ -186,6 +196,7 @@ async fn supervise_sessions(
     mut spirc: Arc<Spirc>,
     mut spirc_task: tokio::task::JoinHandle<()>,
     current_spirc: watch::Sender<Option<Arc<Spirc>>>,
+    current_session: watch::Sender<Session>,
     track_list: watch::Receiver<Vec<String>>,
     state: StateStore,
     mut shutdown: watch::Receiver<bool>,
@@ -234,6 +245,7 @@ async fn supervise_sessions(
             session.shutdown();
         }
         session = replacement_session(&session, &session_config, Some(runtime_cache.clone()));
+        current_session.send_replace(session.clone());
         player.set_session(session.clone());
         let reconnect = Spirc::new(
             reconnect_config(&connect_config, mixer.as_ref()),
@@ -534,7 +546,7 @@ fn execute_spirc_command(spirc: &Spirc, player: &Player, command: Command) -> Re
             let uri = SpotifyUri::from_uri(&uri).context("invalid Spotify URI")?;
             spirc.add_to_queue(uri)?;
         }
-        Command::Hello | Command::Ping | Command::GetState => {
+        Command::Hello | Command::Ping | Command::GetState | Command::PlaylistItems { .. } => {
             bail!("command is handled by the protocol server")
         }
     }

@@ -127,4 +127,41 @@ TestCase {
     compare(cache.read("a").next, "")
     cache.itemLimit = 200
   }
+
+  function test_largePlaylistRetainsPaginationAfterCacheCap() {
+    var rows = []
+    for (var i = 0; i < 250; i++) rows.push({ id: "duplicate-song", playlistPosition: i })
+    cache.itemLimit = 200
+    cache.write("playlist:large", { item: { type: "playlist", id: "large", snapshotId: "v1" },
+      items: rows, next: "" })
+    var kept = cache.read("playlist:large")
+    compare(kept.items.length, 200)
+    verify(kept.next !== "", "The cache cap made the rest of the playlist unreachable")
+    verify(String(kept.next).indexOf("offset=200") >= 0,
+      "The cached resume cursor does not follow the last kept Spotify position")
+  }
+
+  function test_cappedPlaylistResumesAfterSkippedPositions() {
+    var rows = []
+    for (var i = 0; i < 3; i++) rows.push({ id: "song-" + i, playlistPosition: i * 4 })
+    cache.itemLimit = 2
+    cache.write("playlist:gaps", { item: { type: "playlist", id: "gaps" }, items: rows,
+      next: "https://api.spotify.com/v1/playlists/gaps/items?offset=50&limit=50" })
+    compare(cache.read("playlist:gaps").next,
+      "https://api.spotify.com/v1/playlists/gaps/items?offset=5&limit=50",
+      "the kept rows resume after their own last position, not the original cursor")
+    cache.itemLimit = 200
+  }
+
+  function test_cappedPageWithoutPositionsCannotResume() {
+    cache.itemLimit = 2
+    cache.write("playlist:unknown", { item: { type: "playlist", id: "unknown" },
+      items: [{ id: "a" }, { id: "b" }, { id: "c" }], next: "cursor" })
+    compare(cache.read("playlist:unknown").next, "")
+    cache.write("album:one", { item: { type: "album", id: "one" },
+      items: [{ playlistPosition: 0 }, { playlistPosition: 1 }, { playlistPosition: 2 }],
+      next: "cursor" })
+    compare(cache.read("album:one").next, "")
+    cache.itemLimit = 200
+  }
 }

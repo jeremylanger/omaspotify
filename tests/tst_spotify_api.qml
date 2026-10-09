@@ -26,6 +26,8 @@ TestCase {
   QtObject {
     id: fakeAuth
 
+    property string resolvedClientId: "old-app"
+
     function withAccessToken(callback) {
       callback(testCase.accessToken, testCase.accessTokenError)
     }
@@ -40,6 +42,23 @@ TestCase {
       callback(testCase.sharedToken, testCase.sharedToken ? "" : "Log in to Spotify first")
     }
     function invalidateAccessToken() { testCase.sharedInvalidations++ }
+  }
+
+  QtObject {
+    id: shippedAuth
+
+    property string resolvedClientId: "old-app"
+    property bool loggedIn: true
+    function withAccessToken(callback) { callback("shipped-token", "") }
+    function invalidateAccessToken() {}
+  }
+
+  QtObject {
+    id: otherSharedAuth
+
+    property bool loggedIn: true
+    function withAccessToken(callback) { callback("other-shared-token", "") }
+    function invalidateAccessToken() {}
   }
 
   Component {
@@ -95,6 +114,7 @@ TestCase {
   }
 
   function init() {
+    fakeAuth.resolvedClientId = "old-app"
     requests = []
     clock = 1000
     tokenInvalidations = 0
@@ -140,6 +160,18 @@ TestCase {
     verify(requests[0].url.indexOf("artist%2Calbum") < 0)
     complete(requests[0], 200, "{\"albums\":{\"items\":[]}}")
     compare(callbacks, 1)
+  }
+
+  function test_backgroundWarmCanDeclineSharedFallback() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    var result = 0
+    api.request("GET", "/playlists/foreign/items", null, null,
+      function(status) { result = status },
+      { priority: "background", allowFallback: false, retryRateLimit: false })
+    complete(requests[0], 403)
+    compare(result, 403)
+    compare(requests.length, 1, "warming must not hammer the shared catalog app")
   }
 
   function test_searchFallsBackToTracksForAnInvalidType() {
@@ -423,11 +455,13 @@ TestCase {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
     var callbacks = 0
-    api.request("GET", "/me", null, null, function() { callbacks++ })
+    api.request("GET", "/me", null, null, function() { callbacks++ },
+      { timeoutMs: 0 })
     requests[0].retryAfter = "120"
     complete(requests[0], 429)
     compare(api.rateLimitedUntil, 121400)
-    api.request("GET", "/me/albums", null, null, function() { callbacks++ })
+    api.request("GET", "/me/albums", null, null, function() { callbacks++ },
+      { timeoutMs: 0 })
 
     clock = 31000
     api.pumpRequests()
@@ -451,7 +485,7 @@ TestCase {
   function test_cooldownLongerThanTimerRangeRechecksWithoutDispatchingEarly() {
     var api = createTemporaryObject(apiComponent, testCase)
     verify(api)
-    api.request("GET", "/me", null, null, function() {})
+    api.request("GET", "/me", null, null, function() {}, { timeoutMs: 0 })
     requests[0].retryAfter = "3000000"
     complete(requests[0], 429)
     var deadline = 3000001400
@@ -666,7 +700,8 @@ TestCase {
     var api = createTemporaryObject(apiComponent, testCase)
     api.rateLimitedUntil = 121000
     var calls = 0
-    api.request("GET", "/me", null, null, function() { calls++ })
+    api.request("GET", "/me", null, null, function() { calls++ },
+      { priority: "background" })
     clock = 120000
     api.expireTimedOutRequests(clock)
     compare(calls, 0)
@@ -680,6 +715,165 @@ TestCase {
     compare(calls, 1)
   }
 
+  function test_defaultPageDeadlineIncludesRateLimitRetries() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var errors = []
+    api.request("GET", "/me/albums", null, null,
+      function(status, payload, error) { errors.push(error) })
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    clock += Api.API_FOREGROUND_TIMEOUT_MS
+    api.expireTimedOutRequests(clock)
+    compare(errors.length, 1, "the page is no longer loading indefinitely")
+    verify(errors[0].indexOf("Spotify is busy") >= 0)
+    compare(api.requestQueue.length, 0)
+    compare(api.timedJobs.length, 0)
+    clock = api.rateLimitedUntil
+    api.pumpRequests()
+    compare(requests.length, 1, "an expired read is never retried later")
+  }
+
+  function test_expiredMutationIsRemovedBeforeSlotsAreReleased() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var limit = fillEverySlot(api)
+    var errors = []
+    api.request("PUT", "/me/player/play", null, null,
+      function(status, payload, error) { errors.push(error) })
+    clock += Api.API_FOREGROUND_TIMEOUT_MS
+    api.expireTimedOutRequests(clock)
+    compare(errors.length, 1)
+    compare(requests.length, limit, "timed-out Play must not be sent late")
+    compare(api.requestsInFlight, 0)
+    compare(api.requestQueue.length, 0)
+  }
+
+  function test_background429YieldsRecoveryTimeToForeground() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var errors = []
+    api.request("GET", "/me/albums", null, null,
+      function(status, payload, error) { errors.push(error) },
+      { priority: "background" })
+    api.request("GET", "/me/shows", null, null, function() {},
+      { priority: "background" })
+    complete(requests[0], 429)
+    compare(errors.length, 1, "optional work does not silently retry four times")
+    compare(api.requestQueue.length, 1)
+    clock = api.rateLimitedUntil
+    api.pumpRequests()
+    compare(requests.length, 1, "the next crawl cannot immediately hit the quota again")
+    api.request("GET", "/me/player", null, null, function() {})
+    compare(requests.length, 2, "playback can use the recovered budget")
+    complete(requests[1], 200)
+    api.pumpRequests()
+    compare(requests.length, 2, "a successful poll does not restart the crawl early")
+    clock = api.backgroundSuspendedUntil
+    api.pumpRequests()
+    compare(requests.length, 3, "the crawl resumes after its recovery interval")
+    verify(requests[2].url.indexOf("/me/shows") >= 0)
+  }
+
+  function test_longRefusalReturnsBeforeWatchdog() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var statuses = []
+    var errors = []
+    api.request("GET", "/playlists/uncached/items", null, null,
+      function(status, payload, error) { statuses.push(status); errors.push(error) },
+      { priority: "interactive" })
+    requests[0].retryAfter = "30"
+    complete(requests[0], 429)
+    compare(statuses.length, 1, "a retry that cannot fit the deadline reports at once")
+    compare(statuses[0], 429)
+    verify(errors[0].indexOf("Try again in 30 seconds") >= 0)
+    compare(api.timedJobs.length, 0)
+    compare(api.requestQueue.length, 0)
+    verify(api.backgroundSuspendedUntil >= clock + Api.API_BACKGROUND_RECOVERY_MS)
+    api.expireTimedOutRequests(clock + Api.API_FOREGROUND_TIMEOUT_MS)
+    clock = api.interactiveLimitedUntil
+    api.pumpRequests()
+    compare(statuses.length, 1, "the refused page is never reported twice")
+    compare(requests.length, 1, "nothing is sent ahead of or after Retry-After")
+  }
+
+  function test_shortRefusalRetriesWithinDeadline() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var statuses = []
+    api.request("GET", "/playlists/uncached/items", null, null,
+      function(status) { statuses.push(status) }, { priority: "interactive" })
+    requests[0].retryAfter = "2"
+    complete(requests[0], 429)
+    compare(statuses.length, 0)
+    clock = api.interactiveLimitedUntil - 1
+    api.pumpRequests()
+    compare(requests.length, 1, "Retry-After is respected")
+    clock = api.interactiveLimitedUntil
+    api.pumpRequests()
+    compare(requests.length, 2)
+    complete(requests[1], 200)
+    compare(statuses, [200])
+  }
+
+  function test_cancelledRefusedRequestIsNotRetried() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var calls = 0
+    var handle = api.request("GET", "/playlists/uncached/items", null, null,
+      function() { calls++ }, { priority: "interactive" })
+    requests[0].retryAfter = "2"
+    complete(requests[0], 429)
+    api.abortRequest(handle)
+    clock = api.interactiveLimitedUntil
+    api.pumpRequests()
+    api.expireTimedOutRequests(clock + Api.API_FOREGROUND_TIMEOUT_MS)
+    compare(requests.length, 1)
+    compare(calls, 0)
+    compare(api.requestsInFlight, 0)
+  }
+
+  function test_pageRevalidationRunsAheadOfLibraryCrawl() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var crawl = []
+    api.request("GET", "/me/albums", null, null, function() {},
+      { priority: "background" })
+    for (var i = 0; i < 3; i++)
+      api.request("GET", "/me/albums", { offset: 50 * (i + 1) }, null,
+        function() {}, { priority: "background" })
+    var checked = 0
+    api.request("GET", "/playlists/cached/items", null, null,
+      function() { checked++ }, { priority: "revalidate", timeoutMs: 15000 })
+    compare(requests.length, 1, "background spacing still applies")
+    clock += Api.backgroundSpacingForRefusals(0)
+    api.pumpRequests()
+    compare(requests.length, 2)
+    verify(requests[1].url.indexOf("/playlists/cached/items") >= 0,
+      "the page check overtakes queued library pages")
+    complete(requests[0], 429)
+    complete(requests[1], 429)
+    compare(checked, 1, "a refused check is not retried")
+    clock = api.rateLimitedUntil
+    api.pumpRequests()
+    compare(requests.length, 2, "the recovery pause still holds the crawl")
+    clock = api.backgroundSuspendedUntil
+    api.pumpRequests()
+    compare(requests.length, 3)
+  }
+
+  function test_expiredMutationCannotDispatchBetweenWatchdogTicks() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var limit = fillEverySlot(api)
+    var errors = []
+    api.request("PUT", "/me/player/play", null, null,
+      function(status, payload, error) { errors.push(error) },
+      { timeoutMs: 1000 })
+    clock = 2000
+    complete(requests[0], 200)
+    compare(requests.length, limit, "expired Play must not dispatch between watchdog ticks")
+    compare(errors.length, 1)
+    verify(errors[0].indexOf("took too long") >= 0)
+    compare(api.requestsInFlight, limit - 1)
+    compare(api.requestQueue.length, 0)
+    api.expireTimedOutRequests(clock)
+    compare(errors.length, 1, "the expired Play reports once")
+  }
+
   function test_quotaExceededDoesNotRetryOrInventCooldown() {
     var api = createTemporaryObject(apiComponent, testCase)
     var error = ""
@@ -691,5 +885,314 @@ TestCase {
     compare(api.requestQueue.length, 0)
     compare(api.diagnostics[0].route, "/search")
     verify(JSON.stringify(api.diagnostics).indexOf("private-query") < 0)
+  }
+  function test_sharedRefusalDoesNotPausePersonalRead() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    api.request("GET", "/artists/catalog/albums", null, null, function() {},
+      { priority: "interactive" })
+    complete(requests[0], 403)
+    compare(requests.length, 2)
+    compare(requests[1].authorization, "Bearer shared-token")
+    requests[1].retryAfter = "30"
+    complete(requests[1], 429)
+    api.request("GET", "/playlists/owned/items", null, null, function() {},
+      { priority: "interactive" })
+    compare(requests.length, 3, "A shared-client refusal must not hold a personal-client read")
+    compare(requests[2].authorization, "Bearer mock-token")
+    complete(requests[2], 200)
+  }
+
+  function test_personalRefusalDoesNotPauseSharedRead() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    api.request("GET", "/me", null, null, function() {},
+      { priority: "interactive", retryRateLimit: false })
+    requests[0].retryAfter = "30"
+    complete(requests[0], 429)
+    api.request("GET", "/me/playlists", null, null, function() {},
+      { priority: "interactive", shared: true })
+    // Direct shared jobs must bypass even the primary queue's cooldown.
+    compare(requests.length, 2)
+    compare(requests[1].authorization, "Bearer shared-token")
+  }
+
+  function test_fallbackCancellationAbortsWireRequest() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    var calls = 0
+    var handle = api.request("GET", "/artists/catalog/albums", null, null,
+      function() { calls++ }, { priority: "interactive" })
+    complete(requests[0], 403)
+    api.abortRequest(handle)
+    verify(requests[1].aborted)
+    complete(requests[1], 200)
+    compare(calls, 0)
+    compare(api.timedJobs.length, 0)
+    compare(api.fallbackTransport.timedJobs.length, 0)
+    compare(api.requestsInFlight, 0)
+    compare(api.fallbackTransport.requestsInFlight, 0)
+  }
+
+  function test_fallbackKeepsOriginalDeadline() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    var results = []
+    api.request("GET", "/artists/catalog/albums", null, null,
+      function(status) { results.push(status) },
+      { priority: "interactive", timeoutMs: 1000 })
+    clock += 900
+    complete(requests[0], 403)
+    clock += 100
+    api.expireTimedOutRequests(clock)
+    compare(results, [], "the shared attempt owns the deadline it inherited")
+    api.fallbackTransport.expireTimedOutRequests(clock)
+    verify(requests[1].aborted)
+    compare(results, [0])
+    complete(requests[1], 200)
+    compare(results, [0])
+    compare(api.timedJobs.length, 0)
+  }
+
+  function test_forwardedExpiryReportsSharedCooldown() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    api.request("GET", "/me/playlists", null, null, function() {},
+      { priority: "interactive", shared: true })
+    requests[0].retryAfter = "30"
+    complete(requests[0], 429)
+    var errors = []
+    api.request("GET", "/artists/catalog/albums", null, null,
+      function(status, payload, error) { errors.push(error) },
+      { priority: "interactive" })
+    complete(requests[1], 403)
+    compare(requests.length, 2, "the shared retry waits out the shared cooldown")
+    clock += Api.API_FOREGROUND_TIMEOUT_MS
+    api.expireTimedOutRequests(clock)
+    api.fallbackTransport.expireTimedOutRequests(clock)
+    compare(errors.length, 1)
+    verify(errors[0].indexOf("Spotify is busy") >= 0, errors[0])
+    api.expireTimedOutRequests(clock)
+    compare(errors.length, 1)
+    compare(api.timedJobs.length, 0)
+  }
+
+  function test_removingFallbackCancelsPendingRequest() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    var calls = 0
+    var handle = api.request("GET", "/artists/catalog/albums", null, null,
+      function() { calls++ }, { priority: "interactive" })
+    var crawl = api.request("GET", "/me/playlists", null, null,
+      function() { calls++ }, { priority: "background", shared: true })
+    complete(requests[0], 403)
+    api.fallbackAuth = null
+    wait(1)
+    api.abortRequest(handle)
+    api.abortRequest(crawl)
+    verify(requests[1].aborted, "Changing apps left the old shared request running")
+    verify(requests[2].aborted, "Changing apps left a shared crawl running")
+    compare(calls, 0)
+    compare(api.timedJobs.length, 0)
+    compare(api.requestsInFlight, 0)
+    api.expireTimedOutRequests(clock + Api.API_FOREGROUND_TIMEOUT_MS)
+    compare(calls, 0)
+  }
+
+  function test_cancelAllDoesNotDispatchQueuedSharedMutation() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    for (var i = 0; i < 4; i++)
+      api.request("GET", "/me/playlists", null, null, function() {}, { shared: true })
+    api.request("PUT", "/me/player/play", null, {}, function() {}, { shared: true })
+    compare(requests.length, 4)
+    api.cancelAll()
+    compare(requests.length, 4, "Cancelling shared reads dispatched a queued mutation")
+    compare(api.timedJobs.length, 0)
+    compare(api.fallbackTransport.timedJobs.length, 0)
+    compare(api.fallbackTransport.requestsInFlight, 0)
+  }
+
+  function test_removingFallbackDoesNotDispatchQueuedSharedMutation() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    var calls = 0
+    for (var i = 0; i < 4; i++)
+      api.request("GET", "/me/playlists", null, null, function() { calls++ }, { shared: true })
+    api.request("PUT", "/me/player/play", null, {}, function() { calls++ }, { shared: true })
+    compare(requests.length, 4)
+    api.fallbackAuth = null
+    wait(1)
+    compare(requests.length, 4, "Changing clients dispatched a queued mutation")
+    for (i = 0; i < 4; i++) verify(requests[i].aborted)
+    compare(api.timedJobs.length, 0)
+    compare(calls, 0)
+  }
+
+  function test_changingFallbackCancelsForwardedRequest() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    var calls = 0
+    api.request("GET", "/artists/catalog/albums", null, null,
+      function() { calls++ }, { priority: "interactive" })
+    complete(requests[0], 403)
+    var shared = api.fallbackTransport
+    api.fallbackAuth = otherSharedAuth
+    verify(requests[1].aborted)
+    compare(shared.timedJobs.length, 0)
+    complete(requests[1], 200)
+    compare(calls, 0)
+    api.request("GET", "/me/playlists", null, null, function() { calls++ },
+      { priority: "interactive", shared: true })
+    compare(requests[2].authorization, "Bearer other-shared-token")
+    complete(requests[2], 200)
+    compare(calls, 1)
+  }
+
+  function test_newPersonalIdentityDoesNotInheritSharedCooldown() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.request("GET", "/me", null, null, function() {})
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    verify(api.rateLimitedUntil > clock)
+    api.cancelAll() // Service also cancels when the old identity logs out.
+    fakeAuth.resolvedClientId = "personal-app"
+    api.request("GET", "/me/playlists", null, null, function() {})
+    compare(requests.length, 2, "a new authorized app reaches the wire immediately")
+    compare(api.rateLimitedUntil, 0)
+    compare(api.interactiveLimitedUntil, 0)
+    compare(api.rateLimitedSince, 0)
+    compare(api.cooldownProbeUsed, false)
+    compare(api.restrictInFlight, false)
+  }
+
+  function test_identitySwitchClearsBackgroundPacingButKeepsSharedQuota() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = fakeSharedAuth
+    verify(api.fallbackTransport)
+    var shared = api.fallbackTransport
+    shared.rateLimitedUntil = clock + 120000
+    shared.backgroundRefusals = 3
+    api.backgroundSuspendedUntil = clock + 120000
+    api.backgroundRefusals = 4
+    api.lastBackgroundStartedAt = clock
+    api.lastInteractiveStartedAt = clock
+    fakeAuth.resolvedClientId = "personal-app"
+    compare(api.backgroundSuspendedUntil, 0)
+    compare(api.backgroundRefusals, 0)
+    compare(api.lastBackgroundStartedAt, 0)
+    compare(api.lastInteractiveStartedAt, 0)
+    compare(api.fallbackTransport, shared)
+    compare(shared.rateLimitedUntil, clock + 120000)
+    compare(shared.backgroundRefusals, 3)
+    api.request("GET", "/me/albums", null, null, function() {},
+      { priority: "background" })
+    compare(requests.length, 1, "the new app has no inherited background pause")
+  }
+
+  function test_identitySwitchCancelsActiveAndQueuedOldRequests() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    var limit = fillEverySlot(api)
+    var calls = 0
+    api.request("PUT", "/me/player/play", null, null, function() { calls++ })
+    fakeAuth.resolvedClientId = "personal-app"
+    compare(requests.length, limit, "cancelling cannot dispatch the queued mutation")
+    compare(api.requestQueue.length, 0)
+    compare(api.timedJobs.length, 0)
+    compare(api.requestsInFlight, 0)
+    for (var i = 0; i < limit; i++) {
+      verify(requests[i].aborted)
+      complete(requests[i], 200)
+    }
+    compare(calls, 0)
+    api.request("GET", "/me/playlists", null, null, function() {})
+    compare(requests.length, limit + 1)
+  }
+
+  function test_tokenRefreshAndUnchangedIdentityKeepQuota() {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.request("GET", "/me", null, null, function() {})
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    var until = api.rateLimitedUntil
+    accessToken = "refreshed-token"
+    fakeAuth.resolvedClientId = "old-app"
+    api.request("GET", "/me/playlists", null, null, function() {})
+    compare(api.rateLimitedUntil, until)
+    compare(requests.length, 1, "refreshing a token cannot bypass the app's quota")
+  }
+
+  function sharedToPersonal(fallbackFirst) {
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.request("GET", "/me", null, null, function() {})
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    var until = api.rateLimitedUntil
+    verify(until > clock)
+    if (fallbackFirst) api.fallbackAuth = shippedAuth
+    fakeAuth.resolvedClientId = "personal-app"
+    if (!fallbackFirst) api.fallbackAuth = shippedAuth
+    var shared = api.fallbackTransport
+    verify(shared)
+    compare(api.rateLimitedUntil, 0)
+    compare(shared.rateLimitedUntil, until, "the shipped app's Retry-After was forgotten")
+    api.request("GET", "/me/playlists", null, null, function() {})
+    compare(requests.length, 2, "the personal app is not held by the shipped app's pause")
+    compare(requests[1].authorization, "Bearer mock-token")
+    complete(requests[1], 200)
+    var errors = []
+    api.request("GET", "/artists/catalog/albums", null, null,
+      function(status, payload, error) { errors.push(error) })
+    complete(requests[2], 403)
+    compare(requests.length, 3, "the first fallback ignored the shipped app's cooldown")
+    var crawled = 0
+    api.request("GET", "/me/playlists", null, null, function() { crawled++ },
+      { priority: "background", shared: true })
+    compare(requests.length, 3)
+    clock = Math.max(until, shared.backgroundSuspendedUntil)
+    shared.pumpRequests()
+    verify(requests.length > 3, "the shared work never resumed after the cooldown")
+    for (var i = 3; i < requests.length; i++)
+      compare(requests[i].authorization, "Bearer shipped-token")
+  }
+
+  function test_sharedToPersonalKeepsTheShippedCooldown() { sharedToPersonal(false) }
+  function test_sharedToPersonalKeepsTheShippedCooldownWhenFallbackArrivesFirst() {
+    sharedToPersonal(true)
+  }
+
+  function personalToShared(fallbackFirst) {
+    fakeAuth.resolvedClientId = "personal-app"
+    var api = createTemporaryObject(apiComponent, testCase)
+    api.fallbackAuth = shippedAuth
+    api.request("GET", "/me/playlists", null, null, function() {},
+      { priority: "background", shared: true })
+    compare(requests[0].authorization, "Bearer shipped-token")
+    requests[0].retryAfter = "120"
+    complete(requests[0], 429)
+    var until = api.fallbackTransport.rateLimitedUntil
+    var suspended = api.fallbackTransport.backgroundSuspendedUntil
+    verify(until > clock)
+    compare(api.rateLimitedUntil, 0)
+    if (fallbackFirst) api.fallbackAuth = null
+    fakeAuth.resolvedClientId = "old-app"
+    if (!fallbackFirst) api.fallbackAuth = null
+    wait(1)
+    compare(api.fallbackTransport, null)
+    compare(api.rateLimitedUntil, until, "the shipped app's live cooldown was dropped")
+    compare(api.backgroundSuspendedUntil, suspended)
+    compare(api.backgroundRefusals, 1)
+    api.request("GET", "/me/albums", null, null, function() {},
+      { priority: "background" })
+    compare(requests.length, 1, "the shipped app burst into its own Retry-After window")
+    clock = suspended
+    api.pumpRequests()
+    compare(requests.length, 2)
+    compare(requests[1].authorization, "Bearer mock-token")
+  }
+
+  function test_personalToSharedImportsTheChildCooldown() { personalToShared(false) }
+  function test_personalToSharedImportsTheChildCooldownWhenFallbackLeavesFirst() {
+    personalToShared(true)
   }
 }

@@ -46,6 +46,8 @@ Item {
   readonly property string playHistoryPath: stateDir + "/plays.json"
   readonly property string libraryCachePath: stateDir + "/library.json"
   readonly property string queryCachePath: stateDir + "/queries.json"
+  readonly property string playlistCachePath: stateDir + "/playlist-songs.json"
+  readonly property string playlistChecksPath: stateDir + "/playlist-songs-checked.json"
   readonly property string artworkDir: cacheHome + "/omaspotify/art"
 
   readonly property var defaultSettingValues: ({
@@ -68,11 +70,16 @@ Item {
     normalizeVolume: "On",
     volumeLevel: "Normal",
     clientId: "",
+    cachePlaylistsOnIdle: "Off",
     librarySort: "library",
     libraryView: "list",
     libraryFilter: "all"
   })
   property var settings: Api.shallowCopy(defaultSettingValues)
+  readonly property bool cachePlaylistsOnIdle: String(settings.cachePlaylistsOnIdle || "Off") === "On"
+  readonly property string playlistCacheStatus: playlistLibraryCache.status
+  readonly property string playlistCacheResult: playlistLibraryCache.lastResult
+  readonly property alias playlistCache: playlistLibraryCache
 
   readonly property string deviceName: String(settings.deviceName || "OmaSpotify").trim() || "OmaSpotify"
   readonly property int idleShutdownMinutes: Math.max(0, Math.min(1440,
@@ -183,6 +190,8 @@ Item {
   property var artworkLastItems: []
   property bool libraryCacheReady: false
   property double libraryCacheFetchedAt: 0
+  property bool libraryCrawlIncomplete: false
+  property bool libraryCrawlFinished: false
   readonly property bool libraryCacheFresh: Api.libraryCacheIsFresh(
     libraryCacheFetchedAt, Date.now(), 6 * 3600000)
   property bool savedTracksCrawling: false
@@ -215,6 +224,8 @@ Item {
   readonly property bool hasLocalPlayer: activePlayer !== null
   property var remotePlayback: null
   property bool remotePlaybackLoading: false
+  property bool remotePlaybackInteractive: false
+  property var remotePlaybackRequest: null
   property var remotePlaybackWaiters: []
   property var rememberedRemoteVolumeDevice: null
   property real rememberedRemoteVolumePercent: -1
@@ -397,8 +408,14 @@ Item {
   property int playlistItemsSerial: 0
   property int playlistRestoreTargetCount: 0
   property var selectedPlaylist: null
+  property var playlistItemsRequest: null
   property string currentUserId: ""
   property string currentUserName: ""
+  property bool profileLoading: false
+  property int profileSerial: 0
+  property int playlistCacheBootstrapMs: 60000
+  property bool playlistSongsRead: false
+  property bool playlistChecksRead: false
   readonly property string playlistItemsEmptyMessage: Api.playlistItemsEmptyMessage(
     selectedPlaylist, playlistItems.length, playlistItemsError,
     playlistItemsStatus, currentUserId, authManager.customClientId === "")
@@ -646,7 +663,7 @@ Item {
       "showVinylRecord", "shortcutPlayer", "shortcutHints", "showLyrics", "showArtwork", "showTrackTitle", "showArtistName",
       "showPausedTrack", "scrollBarText", "scrollSpeed", "maxBarTextWidth",
       "fixedBarWidth", "audioQuality", "normalizeVolume", "volumeLevel",
-      "clientId", "librarySort", "libraryView", "libraryFilter"]
+      "clientId", "cachePlaylistsOnIdle", "librarySort", "libraryView", "libraryFilter"]
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i]
       if (source[key] !== undefined) next[key] = source[key]
@@ -679,6 +696,7 @@ Item {
     // Anything that is not a 32-hex ID (including empty) means "keep shipped".
     var customClientId = String(next.clientId || "").trim()
     next.clientId = customClientId.toLowerCase()
+    next.cachePlaylistsOnIdle = String(next.cachePlaylistsOnIdle || "Off") === "On" ? "On" : "Off"
     next.normalizeVolume = Api.normalizedNormalizeVolume(next.normalizeVolume)
     next.volumeLevel = Api.normalizedVolumeLevel(next.volumeLevel)
     next.librarySort = Api.normalizedLibrarySort(next.librarySort)
@@ -884,6 +902,20 @@ Item {
     return Api.queryCacheKey(["playlist", String(playlist.id)])
   }
 
+  function playlistPageFor(playlist, pageKey) {
+    var warmed = playlistLibraryCache.read(playlist.id)
+    var recent = pageCache.read(pageKey)
+    var warmEntry = playlistLibraryCache.entries[String(playlist.id)]
+    var recentEntry = pageCache.entries[pageKey]
+    if (warmed && recent) {
+      var sameVersion = String(warmed.item.snapshotId || "") === String(recent.item.snapshotId || "")
+      if ((sameVersion && recent.items.length > warmed.items.length)
+          || (!sameVersion && recentEntry.updatedAt > warmEntry.updatedAt)) warmed = null
+    }
+    return { data: warmed || recent, freshness: warmed
+      ? playlistLibraryCache.freshness(playlist.id) : pageCache.freshness(pageKey), warmed: !!warmed }
+  }
+
   function applyDetailSnapshot(snapshot, item) {
     detailItem = snapshot.item || item
     detailItems = Array.isArray(snapshot.items) ? snapshot.items : []
@@ -904,33 +936,43 @@ Item {
     detailCacheSaveTimer.stop()
     if (!detailCacheKey || !detailSettled) return
     pageCache.write(detailCacheKey, detailSnapshot)
+    // A message stands in for rows Spotify would not return; it is not a song list.
+    if (detailItem && detailItem.type === "playlist" && !detailMessage)
+      playlistLibraryCache.keep({ item: detailItem, items: detailItems, next: detailNext })
   }
 
   function keepPlaylistPage() {
     playlistCacheSaveTimer.stop()
-    if (!playlistCacheKey || playlistItemsLoading || playlistItemsError) return
+    if (!playlistCacheKey || playlistItemsLoading || playlistItemsRequest
+        || playlistItemsError) return
     if (playlistFromCache) return
     pageCache.write(playlistCacheKey, playlistSnapshot)
+    playlistLibraryCache.keep(playlistLibraryCache.withHeldCover(playlistSnapshot))
   }
 
   // Anything that edits a playlist makes what we kept of it wrong.
   function forgetCachedPlaylist(playlist) {
     var id = playlist && playlist.id ? String(playlist.id) : ""
     if (!id) return
+    playlistLibraryCache.drop(id)
     pageCache.drop(Api.queryCacheKey(["playlist", id]))
     pageCache.drop(Api.queryCacheKey(["detail", "playlist", id, ""]))
   }
 
-  function saveLibraryCache() {
+  // Only a finished crawl makes the copy fresh; saving one changed item keeps its age.
+  function saveLibraryCache(crawled) {
     if (!libraryCacheReady) return
+    if (crawled === true) libraryCrawlFinished = true
     libraryCacheSaveTimer.restart()
   }
 
   function flushLibraryCache() {
     libraryCacheSaveTimer.stop()
     // An empty copy is never trusted, so a wiped or failed library is asked for again.
-    libraryCacheFetchedAt = playlists.concat(savedAlbums, followedArtists,
-      savedShows).length ? Date.now() : 0
+    if (libraryCrawlIncomplete || !playlists.concat(savedAlbums, followedArtists, savedShows).length)
+      libraryCacheFetchedAt = 0
+    else if (libraryCrawlFinished) libraryCacheFetchedAt = Date.now()
+    libraryCrawlFinished = false
     libraryCacheFile.setText(Api.encodeLibraryCache(playlists, savedAlbums,
       followedArtists, savedShows, libraryCacheFetchedAt))
   }
@@ -1312,11 +1354,11 @@ Item {
     else playbackPositionTick++
   }
 
-  function finishRemotePlaybackWaiters(ok) {
+  function finishRemotePlaybackWaiters(ok, error) {
     var pending = remotePlaybackWaiters.slice()
     remotePlaybackWaiters = []
     for (var i = 0; i < pending.length; i++) {
-      try { pending[i](ok === true) }
+      try { pending[i](ok === true, String(error || "")) }
       catch (e) { /* callers own callback errors */ }
     }
   }
@@ -1545,15 +1587,23 @@ Item {
   }
 
   function loadPlaybackState(callback, reportError) {
-    if (typeof callback === "function") {
+    var waiting = typeof callback === "function"
+    if (waiting) {
       var waiters = remotePlaybackWaiters.slice()
       waiters.push(callback)
       remotePlaybackWaiters = waiters
     }
-    if (remotePlaybackLoading) return
+    if (remotePlaybackLoading && (remotePlaybackInteractive || !waiting)) return
+    // A caller waiting on the result replaces a status poll, which a
+    // background rate-limit pause can hold in the queue past its deadline.
+    if (remotePlaybackLoading) spotifyApi.abortRequest(remotePlaybackRequest)
     var expected = dataSerial
     remotePlaybackLoading = true
-    spotifyApi.request("GET", "/me/player", { additional_types: "episode" }, null,
+    remotePlaybackInteractive = waiting
+    // This is also the first-click device probe. A status poll must not hold
+    // playback behind the normal fifteen-second deadline or quota retries.
+    remotePlaybackRequest = spotifyApi.request("GET", "/me/player",
+      { additional_types: "episode" }, null,
       function(status, payload, error) {
         root.remotePlaybackLoading = false
         if (expected !== root.dataSerial) {
@@ -1563,8 +1613,9 @@ Item {
         if (!error) root.applyPlaybackState(payload)
         else if (reportError === true) root.fail(error)
         if (!error && !root.hasMedia) root.loadResumeCandidate()
-        root.finishRemotePlaybackWaiters(!error)
-      })
+        root.finishRemotePlaybackWaiters(!error, error)
+      }, { priority: waiting ? "interactive" : "",
+        retryRateLimit: false, timeoutMs: 2000 })
   }
 
   function apiAction(method, path, query, body, successText, callback) {
@@ -1590,13 +1641,60 @@ Item {
   // Fetch only the dataset represented by the visible page. An empty but
   // successfully loaded list is tracked separately so revisiting it causes no
   // network request; the explicit refresh control can still force one.
-  // A page shows nothing at all until these land, so they go ahead of the
-  // queue and get an early try while Spotify is refusing.
-  // A page showing nothing goes ahead of the queue. A page already drawn from
-  // the cache is only being checked, so it takes its turn like anything else.
+  // An empty page goes ahead of the queue. A cached page is already readable,
+  // so its refresh uses the same pacing and recovery pause as library work.
+  function playlistReadUsesCatalog(method, path, known) {
+    if (!usingPersonalClientId || !spotifyApi.fallbackAuth
+        || spotifyApi.fallbackAuth.loggedIn !== true) return false
+    var id = Api.playlistReadId(method, path)
+    if (!id) return false
+    var playlist = playlistById(id)
+    if (!playlist && known && String(known.id) === id) playlist = known
+    if (!playlist && selectedPlaylist && String(selectedPlaylist.id) === id)
+      playlist = selectedPlaylist
+    if (!playlist && detailItem && detailItem.type === "playlist"
+        && String(detailItem.id) === id) playlist = detailItem
+    return Api.playlistNeedsCatalogRead(playlist, currentUserId)
+  }
+
   function pageRequest(method, path, query, callback, revalidating) {
-    return spotifyApi.request(method, path, query, null, callback,
-      { priority: revalidating === true ? "" : "interactive" })
+    return playlistSourceRequest(method, path, query, callback,
+      { priority: revalidating === true ? "revalidate" : "interactive",
+        timeoutMs: Api.API_FOREGROUND_TIMEOUT_MS,
+        shared: playlistReadUsesCatalog(method, path) })
+  }
+
+  // A playlist read goes to the local player first while it is up: its
+  // Connect session reads every list the account can see, including the ones
+  // a personal Web API app is refused, and spends no developer quota. Anything
+  // else, or a read the player refuses, takes the Web API with the caller's
+  // own options. The handle aborts and chains like a transport handle.
+  function playlistSourceRequest(method, path, query, callback, options) {
+    var read = backendClient.ready ? Api.backendPlaylistRead(method, path, query) : null
+    if (!read) return spotifyApi.request(method, path, query, null, callback, options)
+    var handle = { aborted: false, xhr: null, job: { local: true, path: path }, forwardedRequest: null }
+    var startedAt = Date.now()
+    backendClient.playlistItems(read.uri, read.offset, read.limit, function(ok, result, error) {
+      if (handle.aborted) return
+      handle.job = null
+      if (ok && result) {
+        callback(200, Api.backendPlaylistPayload(read, result), "", null)
+        return
+      }
+      console.warn("Local player could not read " + Api.redact(String(path || ""))
+        + " after " + (Date.now() - startedAt) + " ms; asking the Web API: " + Api.redact(error))
+      handle.forwardedRequest = spotifyApi.request(method, path, query, null, callback, options)
+    })
+    return handle
+  }
+
+  // A receiver set never to sleep is worth having up before the first play:
+  // playlists then read through it instead of the Web API.
+  function startResidentReceiver() {
+    if (idleShutdownMinutes !== 0 || !cachePlaylistsOnIdle && !uiVisible) return
+    if (!daemonManager.credentialsAvailable || !daemonManager.playbackReady) return
+    if (daemonManager.running || daemonManager.busy) return
+    daemonManager.start()
   }
 
   function openView(view, force) {
@@ -1629,6 +1727,7 @@ Item {
     // A recent copy on disk is already on screen; refetching it is about thirty
     // requests that only help Spotify rate limit us.
     if (libraryCacheFresh) return
+    libraryCrawlIncomplete = false
     fillSidebarCollection("playlists")
     fillSpotifyPlaylists()
     fillSidebarCollection("albums")
@@ -1658,7 +1757,7 @@ Item {
         if (page.next && depth < 40) return ask(page.next, null, depth + 1)
         root.spotifyPlaylists = found
         root.playlists = Api.withSpotifyPlaylists(root.playlists, found)
-        root.saveLibraryCache()
+        root.saveLibraryCache(true)
       }, { priority: "background", shared: true })
     }
     ask("/me/playlists", { limit: 50 }, 1)
@@ -1669,49 +1768,53 @@ Item {
   function fillSidebarCollection(kind) {
     var spec = libraryCollectionSpec(kind)
     if (root[spec.loading]) return
-    loadLibraryCollection(kind, false, function(total) {
-      root.fanOutSidebarCollection(kind, Number(total) || 0)
+    var cached = root[spec.items]
+    loadLibraryCollection(kind, false, function(total, error) {
+      if (error) root.keepIncompleteCollection(kind, cached)
+      else root.fanOutSidebarCollection(kind, Number(total) || 0, cached)
     }, undefined, true)
   }
 
-  function continueSidebarCollection(kind, depth) {
+  function continueSidebarCollection(kind, depth, cached) {
     // 40 pages of 50 covers a very large library; the guard just stops a broken
     // cursor from looping forever.
     if (depth > 40) return
     var spec = libraryCollectionSpec(kind)
     if (!root[spec.next] || root[spec.loading]) {
-      saveLibraryCache()
+      saveLibraryCache(true)
       if (kind === "playlists") refreshPlaylistEdits()
       return
     }
-    loadLibraryCollection(kind, true, function() {
-      root.continueSidebarCollection(kind, depth + 1)
+    loadLibraryCollection(kind, true, function(total, error) {
+      if (error) root.keepIncompleteCollection(kind, cached)
+      else root.continueSidebarCollection(kind, depth + 1, cached)
     }, undefined, true)
   }
 
   // Cursor-paged collections have to be walked in order. The rest report a
   // total on the first reply, so every remaining page is asked for at once.
-  function fanOutSidebarCollection(kind, total) {
+  function fanOutSidebarCollection(kind, total, cached) {
     var spec = libraryCollectionSpec(kind)
     if (spec.cursor === true) {
-      continueSidebarCollection(kind, 1)
+      continueSidebarCollection(kind, 1, cached)
       return
     }
     var limit = Number(spec.query.limit) || 50
     requestCollectionOffsets(kind, spec,
       Api.pageOffsets(Math.min(total, libraryCacheLimit), limit,
-        root[spec.items].length), 0)
+        root[spec.items].length), 0, cached)
   }
 
   // A dropped page leaves a hole in the middle of the library, so the offsets
   // that failed are asked for again rather than resumed from the end.
-  function requestCollectionOffsets(kind, spec, offsets, attempt) {
+  function requestCollectionOffsets(kind, spec, offsets, attempt, cached) {
     if (offsets.length === 0 || attempt > 2) {
-      root[spec.next] = ""
+      if (offsets.length > 0) keepIncompleteCollection(kind, cached)
+      else root[spec.next] = ""
       root[spec.loaded] = true
       if (kind === "playlists" && usingPersonalClientId)
         playlists = Api.withSpotifyPlaylists(playlists, spotifyPlaylists)
-      saveLibraryCache()
+      saveLibraryCache(true)
       if (kind === "playlists") refreshPlaylistEdits()
       return
     }
@@ -1727,10 +1830,21 @@ Item {
           if (error) failed.push(offset)
           else root.absorbCollectionPage(kind, spec, payload)
           if (pending > 0) return
-          root.requestCollectionOffsets(kind, spec, failed, attempt + 1)
+          root.requestCollectionOffsets(kind, spec, failed, attempt + 1, cached)
         }, { priority: "background" })
     }
     for (var i = 0; i < offsets.length; i++) ask(offsets[i])
+  }
+
+  // Pages that never arrived leave the cached rows in place and keep the
+  // library stale, so the next launch asks for it again.
+  function keepIncompleteCollection(kind, cached) {
+    var spec = libraryCollectionSpec(kind)
+    libraryCrawlIncomplete = true
+    libraryCacheFetchedAt = 0
+    var kept = Api.mergeUnique(root[spec.items], cached).slice(0, libraryCacheLimit)
+    if (kept.length !== root[spec.items].length) root[spec.items] = kept
+    saveLibraryCache()
   }
 
   function absorbCollectionPage(kind, spec, payload) {
@@ -1743,15 +1857,34 @@ Item {
     else markItemsSaved(page.items, true)
   }
 
-  function loadProfile() {
-    if (currentUserId) return
+  function loadProfile(timeoutMs) {
+    if (currentUserId || profileLoading) return
     var expected = dataSerial
+    var identity = authManager.resolvedClientId
+    var serial = ++profileSerial
+    profileLoading = true
     spotifyApi.request("GET", "/me", null, null, function(status, payload, error) {
-      if (expected !== root.dataSerial || error || !payload) return
+      if (serial !== root.profileSerial) return
+      root.profileLoading = false
+      if (expected !== root.dataSerial || identity !== authManager.resolvedClientId
+          || error || !payload) return
       root.currentUserId = String(payload.id || "")
       root.currentUserName = String(payload.display_name || "")
       root.refreshPlaylistEdits()
-    }, { priority: "background" })
+    }, { priority: "background", timeoutMs: timeoutMs })
+  }
+
+  // Idle caching keeps songs per account, and after a restart nothing asks who
+  // is signed in until the panel opens. While it is on, that is found out
+  // quietly, along with the playlist list when there is none to work through.
+  function bootstrapPlaylistCache() {
+    if (!currentUserId) loadProfile(Api.API_FOREGROUND_TIMEOUT_MS)
+    else if (!playlists.length && !playlistsLoading) {
+      // Playlists alone are not the library, so opening the panel still reads all of it.
+      libraryCrawlIncomplete = true
+      libraryCacheFetchedAt = 0
+      fillSidebarCollection("playlists")
+    }
   }
 
   function playlistById(id) {
@@ -1781,22 +1914,73 @@ Item {
 
   // Every playlist edit comes back with a new snapshot id, so this is the one
   // place that knows the page we kept is now wrong.
-  function updatePlaylistSnapshot(id, snapshotId) {
+  function updatePlaylistSnapshot(id, snapshotId, interrupted) {
+    if (!id || !snapshotId) return
+    stopPlaylistReads(id, interrupted)
+    forgetCachedPlaylist({ id: String(id) })
+    publishPlaylistVersion(id, snapshotId)
+    if (detailItem && detailItem.type === "playlist")
+      detailItem = playlistWithVersion(detailItem, id, String(snapshotId))
+  }
+
+  // An edit outdates any read of the same playlist begun before it: landing
+  // later, it would replace the edited rows on screen and their version. What
+  // was stopped, and to what depth, is kept so the edit can read it again.
+  function stopPlaylistReads(id, interrupted) {
+    playlistLibraryCache.pause()
     var key = String(id || "")
-    var snapshot = String(snapshotId || "")
-    if (!key || !snapshot) return
-    forgetCachedPlaylist({ id: key })
-    function updated(item) {
-      if (!item || String(item.id || "") !== key) return item
-      var copy = Api.shallowCopy(item)
-      copy.snapshotId = snapshot
-      return copy
+    var result = interrupted
+      || ({ playlist: false, detail: false, playlistCount: 0, detailCount: 0 })
+    if (selectedPlaylist && String(selectedPlaylist.id || "") === key
+        && playlistItems.length && (playlistItemsRequest || playlistItemsLoading)) {
+      result.playlist = true
+      result.playlistCount = Math.max(result.playlistCount, playlistRememberedItemCount)
+      stopPlaylistItems()
+      playlistRestoreTargetCount = 0
     }
-    var next = []
-    for (var i = 0; i < playlists.length; i++) next.push(updated(playlists[i]))
-    playlists = next
-    selectedPlaylist = updated(selectedPlaylist)
-    if (detailItem && detailItem.type === "playlist") detailItem = updated(detailItem)
+    if (detailItem && detailItem.type === "playlist"
+        && String(detailItem.id || "") === key && detailItems.length
+        && (detailLoading || detailRevalidating)) {
+      result.detail = true
+      result.detailCount = Math.max(result.detailCount, detailRememberedItemCount)
+      detailSerial++
+      detailLoading = false
+      detailRevalidating = false
+      detailRestoreTargetCount = 0
+    }
+    return result
+  }
+
+  // A view whose read an edit stopped reads the playlist again at its depth:
+  // from the top once the edit succeeded, or by checking the rows still on
+  // screen again when the edit failed.
+  function resumePlaylistReads(playlist, interrupted, edited) {
+    var key = String(playlist && playlist.id || "")
+    if (interrupted.playlist && selectedPlaylist && String(selectedPlaylist.id || "") === key) {
+      if (edited) reloadSelectedPlaylist(interrupted.playlistCount)
+      else openPlaylist(playlistById(key) || selectedPlaylist, interrupted.playlistCount,
+        { item: selectedPlaylist, items: playlistItems, next: playlistItemsNext })
+    }
+    if (interrupted.detail && detailItem && detailItem.type === "playlist"
+        && String(detailItem.id || "") === key)
+      openDetail(detailItem, "", interrupted.detailCount, edited ? undefined : detailSnapshot)
+  }
+
+  function playlistWithVersion(item, id, snapshot) {
+    if (!item || String(item.id || "") !== String(id)) return item
+    var copy = Api.shallowCopy(item)
+    copy.snapshotId = snapshot
+    return copy
+  }
+
+  // The open playlist is labelled with the version of the rows on screen, and
+  // the library learns a version once rows of it have arrived.
+  function publishPlaylistVersion(id, snapshotId) {
+    var snapshot = String(snapshotId || "")
+    if (snapshot) playlists = playlists.map(function(item) {
+      return root.playlistWithVersion(item, id, snapshot)
+    })
+    selectedPlaylist = playlistWithVersion(selectedPlaylist, id, snapshot)
   }
 
   // Rebuilding this array replaces every delegate, so it is coalesced. Library
@@ -2041,6 +2225,7 @@ Item {
     activeView = normalizedView(view)
     authManager.withAccessToken(function(token, error) {
       if (token) {
+        root.startResidentReceiver()
         root.loadPlaybackState()
         root.loadProfile()
         root.refreshPlayHistory(false)
@@ -2129,8 +2314,9 @@ Item {
       function(status, payload, error) {
         if (expected !== root.dataSerial) return
         root[spec.loading] = false
-        if (error) root.fail(error)
-        else {
+        if (error) {
+          if (background !== true) root.fail(error)
+        } else {
           var mapper = root.libraryMapper(spec.mapper)
           var page = spec.cursor
             ? Api.normalizeCursorPage(payload && payload.artists, mapper)
@@ -2152,8 +2338,8 @@ Item {
         }
         if (typeof callback === "function")
           callback(payload && payload.total !== undefined ? payload.total
-            : (payload && payload.artists ? payload.artists.total : 0))
-      }, background === true ? { priority: "background" } : null)
+            : (payload && payload.artists ? payload.artists.total : 0), error)
+      }, { priority: background === true ? "background" : "interactive" })
   }
 
   function loadPlaylists(append, callback, serial) {
@@ -2391,18 +2577,23 @@ Item {
     loadLibraryCollection(value, append === true)
   }
 
-  function openPlaylist(playlist, restoredItemCount) {
+  // Rows still on screen can stand in for the cache; they are always checked.
+  function openPlaylist(playlist, restoredItemCount, onScreen) {
     if (!playlist || !playlist.id) return
     succeed("")
-    playlistItemsSerial++
-    playlistItemsLoading = false
+    stopPlaylistItems()
     playlistRestoreTargetCount = Api.normalizedPlaylistRestoreCount(
       restoredItemCount)
-    selectedPlaylist = playlist
     playlistItemsError = ""
     playlistItemsStatus = 0
     playlistCacheKey = playlistCacheKeyFor(playlist)
-    var kept = pageCache.read(playlistCacheKey)
+    playlistLibraryCache.pause()
+    var cachedPage = playlistPageFor(playlist, playlistCacheKey)
+    var kept = onScreen || cachedPage.data
+    var storedVersion = String(kept && kept.item && kept.item.snapshotId || "")
+    var knownVersion = String(playlist.snapshotId || "")
+    selectedPlaylist = kept ? playlistWithVersion(playlist, playlist.id, storedVersion)
+      : playlist
     playlistItems = kept && Array.isArray(kept.items) ? kept.items : []
     playlistItemsNext = kept ? String(kept.next || "") : ""
     playlistFromCache = !!kept
@@ -2410,31 +2601,85 @@ Item {
     // depth already on screen instead of leaving a shorter list behind.
     playlistRestoreTargetCount = Math.max(playlistRestoreTargetCount,
       playlistItems.length)
-    if (pageCache.freshness(playlistCacheKey) === "fresh") {
+    var knownChange = storedVersion && knownVersion && storedVersion !== knownVersion
+    var freshness = cachedPage.freshness
+    if (!onScreen && !knownChange && freshness === "fresh") {
       if (Api.playlistRestoreShouldContinue(playlistItems.length,
           playlistRestoreTargetCount, playlistItemsNext)) loadPlaylistItems(true)
       else playlistRestoreTargetCount = 0
       return
     }
-    loadPlaylistItems(false)
+    // The library is saved apart from the songs and can name an older version
+    // than the rows kept, so a difference is settled by asking Spotify.
+    if (kept && storedVersion) checkPlaylistVersion(kept, !!onScreen)
+    else loadPlaylistItems(false, false, kept ? knownVersion : undefined)
   }
 
-  function loadPlaylistItems(append) {
-    if (!selectedPlaylist || !selectedPlaylist.id || playlistItemsLoading) return
+  // Confirmed rows from the cache are kept fresh again; rows that were only
+  // on screen are not written, since the cache never held them.
+  function checkPlaylistVersion(kept, onScreen) {
+    var playlistId = String(selectedPlaylist.id)
+    var expected = dataSerial
+    var serial = playlistItemsSerial
+    var cacheKey = playlistCacheKey
+    var handle = pageRequest("GET", "/playlists/" + encodeURIComponent(playlistId),
+      { fields: "snapshot_id" }, function(status, payload, error) {
+        if (expected !== root.dataSerial || serial !== root.playlistItemsSerial
+            || !root.selectedPlaylist || String(root.selectedPlaylist.id) !== playlistId) return
+        root.playlistItemsRequest = null
+        if (error) {
+          // Keep the visible cache, but leave it stale so a later visit retries.
+          root.playlistRestoreTargetCount = 0
+          return
+        }
+        var version = String(payload && payload.snapshot_id || "")
+        if (version && version === String(kept.item.snapshotId || "")) {
+          var listed = root.playlistById(playlistId)
+          if (listed && String(listed.snapshotId || "") !== version)
+            root.publishPlaylistVersion(playlistId, version)
+          if (!onScreen) pageCache.write(cacheKey, kept)
+          if (!onScreen) playlistLibraryCache.keep(playlistLibraryCache.withHeldCover(kept))
+          if (Api.playlistRestoreShouldContinue(root.playlistItems.length,
+              root.playlistRestoreTargetCount, root.playlistItemsNext))
+            root.loadPlaylistItems(true)
+          else root.playlistRestoreTargetCount = 0
+          return
+        }
+        // No version means we cannot establish freshness. Fetch the rows; the
+        // version they belong to is published only once they arrive.
+        root.loadPlaylistItems(false, false, version)
+      }, true)
+    if (handle.job) playlistItemsRequest = handle
+  }
+
+  function stopPlaylistItems() {
+    spotifyApi.abortRequest(playlistItemsRequest)
+    playlistItemsRequest = null
+    playlistItemsSerial++
+    playlistItemsLoading = false
+  }
+
+  // A first page fetched for a checked version publishes it once the rows land.
+  function loadPlaylistItems(append, explicit, checkedVersion) {
+    if (!selectedPlaylist || !selectedPlaylist.id) return
+    if (explicit !== true && (playlistItemsLoading || playlistItemsRequest)) return
     var path = append ? playlistItemsNext
       : "/playlists/" + encodeURIComponent(String(selectedPlaylist.id)) + "/items"
     if (!path) return
+    if (playlistItemsLoading || playlistItemsRequest) stopPlaylistItems()
     var playlistId = String(selectedPlaylist.id)
     var expected = dataSerial
     var requestSerial = playlistItemsSerial
-    // Rows already on screen came from the cache, so this is only a check.
-    var drawn = !append && playlistItems.length > 0
-    playlistItemsLoading = true
-    pageRequest("GET", path, append ? null : { limit: 50 },
+    // Rows already on screen are only being checked or restored, so that
+    // waits its turn without holding the list in a loading state.
+    var background = explicit !== true && playlistItems.length > 0
+    playlistItemsLoading = !background
+    var handle = pageRequest("GET", path, append ? null : { limit: 50 },
       function(status, payload, error) {
         if (expected !== root.dataSerial) return
         if (requestSerial !== root.playlistItemsSerial) return
         if (!root.selectedPlaylist || String(root.selectedPlaylist.id) !== playlistId) return
+        root.playlistItemsRequest = null
         root.playlistItemsLoading = false
         if (error) {
           root.playlistRestoreTargetCount = 0
@@ -2444,7 +2689,7 @@ Item {
             root.currentUserId !== "")
           // What was drawn from the cache stays: a failed check is no reason
           // to empty a list that is already on screen.
-          if (drawn) return
+          if (background) return
           if (!append) {
             root.playlistItemsStatus = status
             root.playlistItemsError = hidden ? "" : error
@@ -2452,7 +2697,7 @@ Item {
           if (!hidden || append) root.fail(error)
           return
         }
-        root.playlistFromCache = false
+        if (!append) root.playlistFromCache = false
         var fallbackPosition = append && root.playlistItems.length
           ? Api.playlistPositionAt(root.playlistItems,
             root.playlistItems.length - 1) + 1 : 0
@@ -2478,11 +2723,19 @@ Item {
             root.playlistRestoreTargetCount, root.playlistItemsNext))
           root.loadPlaylistItems(true)
         else root.playlistRestoreTargetCount = 0
-      }, drawn || append === true)
+        // A page read through the local player names its own version. A
+        // checked version is published even when empty: that is what clears
+        // the label of rows whose version Spotify would not say.
+        var pageVersion = checkedVersion !== undefined ? checkedVersion
+          : String(payload && payload.snapshot_id || "")
+        if (!append && (checkedVersion !== undefined || pageVersion))
+          root.publishPlaylistVersion(playlistId, pageVersion)
+      }, background)
+    if (handle.job) playlistItemsRequest = handle
   }
 
   function loadMorePlaylistItems() {
-    loadPlaylistItems(true)
+    loadPlaylistItems(true, true)
   }
 
   function ensurePlaylistItemCount(value) {
@@ -2490,9 +2743,8 @@ Item {
     var target = Api.normalizedPlaylistRestoreCount(value)
     if (target <= playlistItems.length) return
     playlistRestoreTargetCount = Math.max(playlistRestoreTargetCount, target)
-    if (playlistItemsLoading) return
-    if (playlistItems.length === 0) loadPlaylistItems(false)
-    else if (playlistItemsNext) loadPlaylistItems(true)
+    if (playlistItemsLoading || playlistItemsRequest) return
+    if (playlistItemsNext) loadPlaylistItems(true)
     else playlistRestoreTargetCount = 0
   }
 
@@ -2522,15 +2774,18 @@ Item {
         || !playlist || !playlist.id
         || playlistActionBusy) return
     playlistActionBusy = true
+    var interrupted = stopPlaylistReads(playlist.id)
     spotifyApi.request("POST", "/playlists/" + encodeURIComponent(String(playlist.id)) + "/items",
       null, { uris: [item.uri] }, function(status, payload, error) {
         root.playlistActionBusy = false
-        if (error) { root.fail(error); return }
-        root.updatePlaylistSnapshot(playlist.id, payload && payload.snapshot_id)
+        if (error) {
+          root.resumePlaylistReads(playlist, interrupted, false)
+          root.fail(error)
+          return
+        }
+        root.updatePlaylistSnapshot(playlist.id, payload && payload.snapshot_id, interrupted)
         root.succeed("Added to " + String(playlist.name || "playlist"))
-        if (root.selectedPlaylist && root.selectedPlaylist.id === playlist.id)
-          root.loadPlaylistItems(false)
-        if (root.detailItem && root.detailItem.id === playlist.id) root.openDetail(root.detailItem)
+        root.reloadPlaylist(playlist, interrupted)
       })
   }
 
@@ -2575,7 +2830,7 @@ Item {
           return
         }
         callback(combined, "")
-      })
+      }, { shared: playlistReadUsesCatalog("GET", requestPath, playlist) })
   }
 
   function addPlaylistCopyBatches(playlist, uris, offset, expected, callback) {
@@ -2655,39 +2910,47 @@ Item {
     })
   }
 
-  function reloadPlaylist(playlist) {
+  function reloadPlaylist(playlist, interrupted) {
     if (!playlist) return
     forgetCachedPlaylist(playlist)
-    var restoredDetailItemCount = detailRememberedItemCount
-    if (selectedPlaylist && selectedPlaylist.id === playlist.id) {
-      var restoredItemCount = playlistRememberedItemCount
-      playlistItemsSerial++
-      playlistItemsLoading = false
-      playlistRestoreTargetCount = restoredItemCount
-      playlistFromCache = false
-      playlistItems = []
-      playlistItemsNext = ""
-      playlistItemsError = ""
-      playlistItemsStatus = 0
-      loadPlaylistItems(false)
-    }
+    var restoredDetailItemCount = Math.max(detailRememberedItemCount,
+      interrupted ? interrupted.detailCount : 0)
+    if (selectedPlaylist && selectedPlaylist.id === playlist.id)
+      reloadSelectedPlaylist(Math.max(playlistRememberedItemCount,
+        interrupted ? interrupted.playlistCount : 0))
     if (detailItem && detailItem.type === "playlist" && detailItem.id === playlist.id)
       openDetail(detailItem, "", restoredDetailItemCount)
+  }
+
+  function reloadSelectedPlaylist(restoredItemCount) {
+    stopPlaylistItems()
+    playlistRestoreTargetCount = restoredItemCount
+    playlistFromCache = false
+    playlistItems = []
+    playlistItemsNext = ""
+    playlistItemsError = ""
+    playlistItemsStatus = 0
+    loadPlaylistItems(false, true)
   }
 
   function removePlaylistItem(item, index, playlist) {
     var target = playlist || selectedPlaylist
     if (!item || !item.uri || !playlistEditable(target) || playlistActionBusy) return
     playlistActionBusy = true
+    var interrupted = stopPlaylistReads(target.id)
     var body = { items: [{ uri: item.uri }] }
     if (target.snapshotId) body.snapshot_id = target.snapshotId
     spotifyApi.request("DELETE", "/playlists/" + encodeURIComponent(String(target.id)) + "/items",
       null, body, function(status, payload, error) {
         root.playlistActionBusy = false
-        if (error) { root.fail(error); return }
-        root.updatePlaylistSnapshot(target.id, payload && payload.snapshot_id)
+        if (error) {
+          root.resumePlaylistReads(target, interrupted, false)
+          root.fail(error)
+          return
+        }
+        root.updatePlaylistSnapshot(target.id, payload && payload.snapshot_id, interrupted)
         root.succeed("Removed from playlist")
-        root.reloadPlaylist(target)
+        root.reloadPlaylist(target, interrupted)
       })
   }
 
@@ -2710,6 +2973,7 @@ Item {
       : Api.playlistReorderBody(sourceIndex, destinationIndex, length,
         target ? target.snapshotId : "")
     if (!body) return
+    var interrupted = stopPlaylistReads(playlistId)
 
     var sourcePosition = orderingItems.length
       ? Api.playlistPositionAt(orderingItems, sourceIndex) : sourceIndex
@@ -2735,10 +2999,12 @@ Item {
           if (detailMatches && root.detailItem && root.detailItem.type === "playlist"
               && String(root.detailItem.id || "") === playlistId)
             root.detailItems = previousDetailItems
+          root.resumePlaylistReads(target, interrupted, false)
           root.fail(error)
           return
         }
-        root.updatePlaylistSnapshot(target.id, payload && payload.snapshot_id)
+        root.updatePlaylistSnapshot(target.id, payload && payload.snapshot_id, interrupted)
+        root.resumePlaylistReads(target, interrupted, true)
         root.succeed("Playlist order updated")
       })
   }
@@ -2761,8 +3027,9 @@ Item {
   function detailPageFromPayload(payload, type, parent) {
     var container = payload || {}
     if (type === "album") container = payload && payload.tracks ? payload.tracks : container
-    else if (type === "playlist")
-      container = payload && (payload.items || payload.tracks) ? (payload.items || payload.tracks) : container
+    // A playlist holds its rows in a page object; a later page is that object itself.
+    else if (type === "playlist" && payload && !Array.isArray(payload.items))
+      container = payload.items || payload.tracks || container
     else if (type === "show") container = payload && payload.episodes ? payload.episodes : container
     else if (type === "audiobook")
       container = payload && payload.chapters ? payload.chapters : container
@@ -2778,9 +3045,10 @@ Item {
     })
   }
 
-  function openDetail(item, requestedArtistQuery, restoredItemCount) {
+  function openDetail(item, requestedArtistQuery, restoredItemCount, onScreen) {
     if (!item || !item.id || item.kind !== "context") return
     var type = String(item.type || "")
+    playlistLibraryCache.pause()
     if (["artist", "album", "playlist", "show", "audiobook"].indexOf(type) < 0) return
     var serial = ++detailSerial
     detailRestoreTargetCount = type === "playlist"
@@ -2812,8 +3080,12 @@ Item {
     // Draw the answer we already have, then decide whether to ask for another.
     // An artist page is six requests, so one opened twice is worth keeping.
     detailCacheKey = detailCacheKeyFor(item, initialArtistQuery)
-    var kept = pageCache.read(detailCacheKey)
-    var held = pageCache.freshness(detailCacheKey)
+    var cachedPage = type === "playlist" ? playlistPageFor(item, detailCacheKey)
+      : { data: pageCache.read(detailCacheKey), freshness: pageCache.freshness(detailCacheKey), warmed: false }
+    var warmed = cachedPage.warmed
+    var kept = onScreen || cachedPage.data
+    var held = onScreen ? "stale" : cachedPage.freshness
+    if (kept && type === "playlist" && item.snapshotId && item.snapshotId !== kept.item.snapshotId) held = "stale"
     if (kept) applyDetailSnapshot(kept, item)
     detailFromCache = !!kept
     detailRevalidating = !!kept
@@ -2842,9 +3114,19 @@ Item {
         if (!kept) root.fail(error)
         return
       }
-      root.detailFromCache = false
       var normalized = Api.normalizeContext(payload, 256)
       if (normalized) root.detailItem = normalized
+      if (type === "playlist" && warmed && !onScreen && kept && payload && payload.snapshot_id
+          && payload.snapshot_id === kept.item.snapshotId) {
+        root.detailLoading = false
+        root.detailRevalidating = false
+        playlistLibraryCache.confirm(kept, normalized ? normalized.imageUrl : "")
+        if (Api.playlistRestoreShouldContinue(root.detailItems.length,
+            root.detailRestoreTargetCount, root.detailNext)) root.loadMoreDetail()
+        else root.detailRestoreTargetCount = 0
+        return
+      }
+      root.detailFromCache = false
       var parent = root.detailItem || item
       if (type === "artist") {
         root.loadArtistThisIs(serial, parent)
@@ -3102,7 +3384,7 @@ Item {
           root.detailItems.length, root.detailRestoreTargetCount,
           root.detailNext)) root.loadMoreDetail()
       else root.detailRestoreTargetCount = 0
-    })
+    }, { shared: playlistReadUsesCatalog("GET", path) })
   }
 
   function ensureDetailItemCount(value) {
@@ -3750,6 +4032,8 @@ Item {
     pendingPlaybackMessage = ""
     pendingPlaybackRadio = null
     pendingPlaybackSerial = 0
+    localSocketWaitTimer.stop()
+    localSocketWaitAttempts = 0
     if (keepActivation !== true) localActivationRequested = false
   }
 
@@ -3766,13 +4050,23 @@ Item {
       clearPendingPlayback()
       return
     }
-    if (backendClient.ready || daemonManager.playbackReady) {
+    if (backendClient.ready) {
       waitForLocalSocketThenPlay(playbackSerial)
       return
     }
-    if (target && target.local && daemonManager.running) {
+    // Connect needs this receiver registered by the current start. A socket
+    // that is connected but not ready is registering its session again, and
+    // a click during that, a start or a socket wait stays pending as the
+    // newest song until the socket is ready.
+    if (target && target.local && target.id && String(target.id) === localDeviceId
+        && daemonManager.running && !daemonManager.busy
+        && !backendClient.connected && !localSocketWaitTimer.running) {
       localActivationRequested = false
       sendPendingPlayback(Api.playbackTargetDeviceId(target, selectedDeviceExplicit))
+      return
+    }
+    if (daemonManager.playbackReady) {
+      waitForLocalSocketThenPlay(playbackSerial)
       return
     }
     if (!daemonManager.binaryAvailable || !daemonManager.unitAvailable) {
@@ -3845,12 +4139,23 @@ Item {
     deviceProbeAttempts = 0
     noteActivity()
 
-    // Opening the panel refreshes current playback asynchronously. Wait for
-    // that in-flight result before choosing the local fallback, otherwise a
-    // fast click can race the refresh and move playback off the active device.
-    if (!selectedDeviceExplicit && remotePlaybackLoading) {
-      loadPlaybackState(function() {
-        root.dispatchPendingPlayback(playbackSerial)
+    // A known active receiver already represents the device shown to the
+    // user. Do not put the click behind an unrelated status poll. Only wait
+    // for the initial short refresh when the local fallback would otherwise
+    // race discovery and move playback off an unknown active receiver.
+    var current = chooseDevice()
+    if (!selectedDeviceExplicit && remotePlaybackLoading
+        && !(current && current.active)) {
+      loadPlaybackState(function(ok, error) {
+        if (ok) {
+          root.dispatchPendingPlayback(playbackSerial)
+          return
+        }
+        // An unconfirmed receiver must not hand playback to this computer.
+        if (playbackSerial !== root.pendingPlaybackSerial
+            || !root.pendingPlaybackBody) return
+        root.fail(error)
+        root.clearPendingPlayback()
       })
       return
     }
@@ -3986,8 +4291,8 @@ Item {
       return
     }
     var candidate = candidates[index]
-    spotifyApi.request("GET", "/playlists/"
-      + encodeURIComponent(String(candidate.id)) + "/items", { limit: 1 }, null,
+    var path = "/playlists/" + encodeURIComponent(String(candidate.id)) + "/items"
+    spotifyApi.request("GET", path, { limit: 1 }, null,
       function(status, payload, error) {
         if (expected !== root.radioSerial) return
         var source = payload && Array.isArray(payload.items) ? payload.items : []
@@ -3999,7 +4304,7 @@ Item {
           return
         }
         root.tryRadioPlaylist(item, candidates, index + 1, expected)
-      })
+      }, { shared: playlistReadUsesCatalog("GET", path, candidate) })
   }
 
   function requestRadioRecommendations(item, expected) {
@@ -4080,11 +4385,15 @@ Item {
     playbackPositionTick++
   }
 
+  // Every status poll that finds nothing playing lands here. The last play
+  // only changes when something was played, and the end of a play asks for
+  // it by itself below, so between those a copy is good for a long while:
+  // every thirty seconds was 900 requests a day from an idle panel.
   function loadResumeCandidate(force) {
     if (resumeCandidateLoading) return
     if (!authManager.loggedIn && !authManager.tokenIsFresh()) return
     if (force !== true && resumeCandidateLoadedAt > 0
-        && Date.now() - resumeCandidateLoadedAt < 30000) return
+        && Date.now() - resumeCandidateLoadedAt < Api.RESUME_CANDIDATE_FRESH_MS) return
     var expected = dataSerial
     resumeCandidateLoading = true
     resumeCandidateLoadedAt = Date.now()
@@ -4342,6 +4651,7 @@ Item {
   }
 
   function clearData() {
+    playlistLibraryCache.pause()
     radioSerial++
     playlistItemsSerial++
     clearPendingPlayback()
@@ -4378,6 +4688,8 @@ Item {
     selectedPlaylist = null
     currentUserId = ""
     currentUserName = ""
+    profileLoading = false
+    profileSerial++
     queue = []
     queueLoaded = false
     devices = []
@@ -4466,6 +4778,7 @@ Item {
     savedEpisodesLoading = false
     savedAudiobooksLoading = false
     playlistItemsLoading = false
+    playlistItemsRequest = null
     playlistActionBusy = false
     playlistConversionBusy = false
     queueLoading = false
@@ -4482,6 +4795,13 @@ Item {
   // What you listened to is yours, not the app's. Signing out has to take it
   // off disk as well as out of memory, or the next account inherits it.
   function forgetPersonalRecord() {
+    playlistLibraryCache.clear()
+    playlistSongsSaveTimer.stop()
+    playlistChecksSaveTimer.stop()
+    if (playlistLibraryCache.diskReady) {
+      playlistSongsFile.setText("")
+      playlistChecksFile.setText("")
+    }
     detailCacheKey = ""
     playlistCacheKey = ""
     detailRevalidating = false
@@ -4512,6 +4832,9 @@ Item {
   }
 
   onPlayingChanged: noteActivity()
+  // What just finished is the new candidate; the next idle poll must not
+  // offer the one before it.
+  onHasMediaChanged: if (!hasMedia && resumeCandidateLoadedAt > 0) loadResumeCandidate(true)
   onPlaybackStateChanged: sleepTimer.noteStopped(
     playbackState === MprisPlaybackState.Stopped)
   onCurrentUriChanged: sleepTimer.noteCurrentUriChanged(currentUri)
@@ -4746,6 +5069,94 @@ Item {
     limit: 16
     staleMs: 300000
     onChanged: if (root.queryCacheReady) queryCacheSaveTimer.restart()
+  }
+
+  PlaylistCache {
+    id: playlistLibraryCache
+    owner: root.currentUserId
+    identity: authManager.resolvedClientId
+    warmingEnabled: root.cachePlaylistsOnIdle
+    signedIn: root.accountConnected
+    diskReady: root.playlistSongsRead && root.playlistChecksRead
+    idle: !root.uiVisible && !root.playlistActionBusy && !root.playlistsLoading
+      && !root.searchLoading
+    playlists: root.playlists
+    localReads: backendClient.ready
+    request: function(path, query, callback) {
+      return root.playlistSourceRequest("GET", path, query, callback,
+        { priority: "background", retryRateLimit: false, allowFallback: false,
+          timeoutMs: Api.API_FOREGROUND_TIMEOUT_MS })
+    }
+    abort: function(handle) { spotifyApi.abortRequest(handle) }
+    onCanRunChanged: if (canRun) root.startResidentReceiver()
+    onChanged: if (diskReady && !playlistSongsSaveTimer.running) playlistSongsSaveTimer.start()
+    onRechecked: if (diskReady && !playlistChecksSaveTimer.running) playlistChecksSaveTimer.start()
+    onVersionChecked: function(playlistId, snapshotId) {
+      var existing = root.playlistById(playlistId)
+      if (!existing || existing.snapshotId === snapshotId) return
+      root.playlists = root.playlists.map(function(item) {
+        return root.playlistWithVersion(item, playlistId, snapshotId)
+      })
+      root.saveLibraryCache()
+    }
+  }
+
+  Timer {
+    id: playlistSongsSaveTimer
+    interval: 10000
+    onTriggered: {
+      // Large JSON writes happen between requests while the panel is closed.
+      if (root.uiVisible) { restart(); return }
+      if (playlistLibraryCache.owner) playlistSongsFile.setText(playlistLibraryCache.serialize())
+    }
+  }
+
+  // Confirming a version only moves a timestamp, so it is saved on its own,
+  // in a file a few kilobytes long, rather than by rewriting every song.
+  Timer {
+    id: playlistChecksSaveTimer
+    interval: 60000
+    onTriggered: if (playlistLibraryCache.owner)
+      playlistChecksFile.setText(playlistLibraryCache.serializeChecks())
+  }
+
+  Timer {
+    id: playlistCacheBootstrapTimer
+    interval: root.playlistCacheBootstrapMs
+    repeat: true
+    triggeredOnStart: true
+    running: root.cachePlaylistsOnIdle && root.libraryCacheReady
+      && (root.accountConnected || !authManager.sessionChecked)
+      && (!root.currentUserId || (!root.playlists.length && !root.playlistsLoaded))
+    onTriggered: root.bootstrapPlaylistCache()
+  }
+
+  FileView {
+    id: playlistSongsFile
+    path: root.playlistCachePath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      playlistLibraryCache.diskRaw = text()
+      root.playlistSongsRead = true
+    }
+    onLoadFailed: root.playlistSongsRead = true
+    onSaveFailed: if (!ensureStateDir.running) ensureStateDir.running = true
+  }
+
+  FileView {
+    id: playlistChecksFile
+    path: root.playlistChecksPath
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      playlistLibraryCache.checksRaw = text()
+      root.playlistChecksRead = true
+    }
+    onLoadFailed: root.playlistChecksRead = true
+    onSaveFailed: if (!ensureStateDir.running) ensureStateDir.running = true
   }
 
   // The whole cache is written at once, so this waits out a burst of page

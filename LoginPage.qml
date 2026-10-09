@@ -225,6 +225,24 @@ Item {
         }
       }
 
+      Row {
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: Style.space(10)
+        visible: page.panel.service && !page.panel.service.usingPersonalClientId
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Shared app slow? Use your own Spotify app?"
+          color: page.panel.muted
+          font.family: page.panel.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        Button {
+          text: "Set up · optional"
+          foreground: page.panel.foreground
+          onClicked: page.panel.openClientSetup()
+        }
+      }
+
       Text {
         width: parent.width
         horizontalAlignment: Text.AlignHCenter

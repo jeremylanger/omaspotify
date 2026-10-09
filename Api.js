@@ -255,6 +255,13 @@ function rateLimitMessage(retryAfter) {
 
 var API_MAX_IN_FLIGHT = 4
 var API_MAX_RATE_LIMIT_RETRIES = 4
+var API_FOREGROUND_TIMEOUT_MS = 15000
+// Let the shared budget recover before optional library work starts again.
+var API_BACKGROUND_RECOVERY_MS = 60000
+// How long the idle resume candidate (the last play, for Play with nothing
+// loaded) is trusted before an idle status poll may fetch it again. A play
+// ending refreshes it at once regardless.
+var RESUME_CANDIDATE_FRESH_MS = 900000
 
 function rateLimitRetryMs(retryAfter, attempt) {
   var value = String(retryAfter || "").trim()
@@ -283,6 +290,13 @@ function responseRetryAfter(xhr) {
   return value ? String(value) : ""
 }
 
+// A development app's daily quota is spent, as opposed to a rolling-window
+// rate limit: Spotify names it in the 429 body, and waiting seconds does not help.
+function quotaExceededPayload(payload) {
+  return !!payload && !!payload.error
+    && payload.error.reason === "QUOTA_EXCEEDED"
+}
+
 function apiRequestIsMutating(method) {
   var value = String(method || "GET").toUpperCase()
   return value !== "GET" && value !== "HEAD"
@@ -293,6 +307,9 @@ function apiJobPriority(job) {
   if (apiRequestIsMutating(job.method)) return 2
   var priority = String(job.priority || "")
   if (priority === "interactive") return 1
+  // A page already on screen is checked before the library crawl continues,
+  // with the same pacing and recovery pause as any other background work.
+  if (priority === "revalidate") return -0.5
   // Library crawling waits behind anything the person actually asked for.
   return priority === "background" ? -1 : 0
 }
@@ -451,6 +468,92 @@ function playlistOwnedByUser(playlist, userId) {
   return !!playlist && !!user && String(playlist.ownerId || "") === user
 }
 
+// Foreign playlist reads belong to the authorized catalog app: newer personal
+// apps cannot read them. Choose that app before spending the personal quota.
+function playlistReadId(method, path) {
+  if (String(method || "GET").toUpperCase() !== "GET" || !safeApiUrl(path)) return ""
+  var match = apiRequestPath(path).split("?")[0].match(/^\/playlists\/([^/]+)(?:\/items)?$/)
+  if (!match) return ""
+  try { return decodeURIComponent(match[1]) } catch (e) { return "" }
+}
+
+// A playlist read the local player can answer from its Connect session:
+// GET /playlists/{id} (its version and cover) or GET /playlists/{id}/items,
+// with the page named in the query or in a continuation cursor. Null for
+// anything else, which keeps its Web API route.
+function backendPlaylistRead(method, path, query) {
+  var id = playlistReadId(method, path)
+  if (!id) return null
+  var clean = apiRequestPath(path)
+  var items = /\/items$/.test(clean.split("?")[0])
+  var params = parseQueryString(clean.split("?")[1] || "")
+  var settings = query || ({})
+  var limit = Number(settings.limit !== undefined ? settings.limit : params.limit)
+  var offset = Number(settings.offset !== undefined ? settings.offset : params.offset)
+  return {
+    id: id,
+    uri: "spotify:playlist:" + id,
+    items: items,
+    offset: items && isFinite(offset) && offset > 0 ? Math.floor(offset) : 0,
+    limit: !items ? 0 : (isFinite(limit) && limit > 0 ? Math.floor(limit) : 100)
+  }
+}
+
+function parseQueryString(text) {
+  var values = ({})
+  var parts = String(text || "").split("&")
+  for (var i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue
+    var pair = parts[i].split("=")
+    try { values[decodeURIComponent(pair[0])] = decodeURIComponent(pair.slice(1).join("=")) }
+    catch (error) { values[pair[0]] = pair.slice(1).join("=") }
+  }
+  return values
+}
+
+// The continuation of a backend page, spelled as the Web API path for the
+// same rows, so a cursor kept in the cache still works if the local player
+// is gone by the time it is followed.
+function backendPlaylistItemsPath(id, offset, limit) {
+  return "/playlists/" + encodeURIComponent(String(id)) + "/items?offset="
+    + Math.max(0, Math.floor(Number(offset) || 0)) + "&limit="
+    + Math.max(1, Math.floor(Number(limit) || 100))
+}
+
+// The backend's answer in the shape the Web API would have given for the
+// same read, so pages and the cache see no difference.
+function backendPlaylistPayload(read, result) {
+  var source = result || ({})
+  if (!read.items) {
+    return {
+      type: "playlist",
+      id: read.id,
+      uri: read.uri,
+      name: String(source.name || ""),
+      snapshot_id: String(source.snapshot_id || ""),
+      images: Array.isArray(source.images) ? source.images : [],
+      items: { total: Number(source.total) || 0 }
+    }
+  }
+  var next = source.next
+  return {
+    items: Array.isArray(source.items) ? source.items : [],
+    // The Web API never says which version a page of rows belongs to; the
+    // player does, so the open list can be labelled with it at once.
+    snapshot_id: String(source.snapshot_id || ""),
+    offset: Number(source.offset) || 0,
+    limit: Number(source.limit) || 0,
+    total: Number(source.total) || 0,
+    next: next === null || next === undefined || next === ""
+      ? null : backendPlaylistItemsPath(read.id, next, read.limit)
+  }
+}
+
+function playlistNeedsCatalogRead(playlist, userId) {
+  return !!playlist && !!String(playlist.ownerId || "") && !!String(userId || "")
+    && playlist.collaborative !== true && !playlistOwnedByUser(playlist, userId)
+}
+
 function playlistItemsHiddenByApi(status, owned, collaborative, knownUser) {
   if (owned === true || collaborative === true || knownUser !== true) return false
   var code = Number(status) || 0
@@ -477,7 +580,8 @@ function playlistItemsEmptyMessage(playlist, itemCount, error, status, userId,
       return playlistItemsHiddenMessage()
     if (Number(status) === 429 && sharedClient === true)
       return sharedClientRateLimitMessage()
-    return "Couldn't load this playlist. Try again in a moment."
+    return typeof error === "string" && error.trim()
+      ? redact(error.trim()) : "Couldn't load this playlist. Try again in a moment."
   }
   if (count > 0) return ""
   if (playlistItemsHiddenByApi(200, owned, collaborative, knownUser))
@@ -995,9 +1099,254 @@ function cappedPageSnapshot(snapshot, limit) {
   }
   for (var i = 0; i < cut.length; i++) {
     var cursor = cut[i] === "items" ? "next" : cut[i] + "Next"
-    if (out.hasOwnProperty(cursor)) out[cursor] = ""
+    var resume = cut[i] === "items" ? playlistResumeCursor(out.item, out.items) : ""
+    if (resume || out.hasOwnProperty(cursor)) out[cursor] = resume
   }
   return out
+}
+
+// The library song cache is written to disk whole, and most of a normalized row
+// is empty fields, links built from its id and copies of the same artists and
+// albums. Stored rows keep only what cannot be rebuilt, under short names, and
+// name each artist or album once per playlist. Reading them back gives the same
+// rows; anything shaped differently is stored as it is.
+var SONG_TRACK_FIELDS = [["kind", "k"], ["type", "y"], ["id", "i"], ["uri", "u"],
+  ["name", "n"], ["subtitle", "s"], ["album", "l"], ["artists", "a"],
+  ["albumItem", "b"], ["parentContext", "c"], ["imageUrl", "m"], ["durationMs", "d"],
+  ["trackNumber", "t"], ["discNumber", "o"], ["releaseDate", "r"], ["addedAt", "at"],
+  ["playedAt", "pt"], ["resumeMs", "rm"], ["fullyPlayed", "f"], ["explicit", "e"],
+  ["externalUrl", "x"]]
+var SONG_TRACK_EXTRAS = [["playlistPosition", "p"]]
+var SONG_CONTEXT_FIELDS = [["kind", "k"], ["type", "y"], ["id", "i"], ["uri", "u"],
+  ["name", "n"], ["subtitle", "s"], ["description", "ds"], ["artists", "a"],
+  ["imageUrl", "m"], ["total", "t"], ["releaseType", "rt"], ["releaseDate", "r"],
+  ["ownerId", "oi"], ["ownerName", "on"], ["followers", "fo"], ["genres", "g"],
+  ["popularity", "po"], ["collaborative", "co"], ["public", "pu"],
+  ["snapshotId", "sn"], ["addedAt", "ad"], ["externalUrl", "x"]]
+var SONG_TRACK_ALIASES = songFieldIndex(SONG_TRACK_FIELDS, 1, 0)
+var SONG_CONTEXT_ALIASES = songFieldIndex(SONG_CONTEXT_FIELDS, 1, 0)
+var SONG_EXTRA_ALIASES = songFieldIndex(SONG_TRACK_EXTRAS, 1, 0)
+var SONG_EXTRA_NAMES = songFieldIndex(SONG_TRACK_EXTRAS, 0, 1)
+
+function songFieldIndex(fields, from, to) {
+  var out = ({})
+  for (var i = 0; i < fields.length; i++) out[fields[i][from]] = fields[i][to]
+  return out
+}
+
+function spotifyLinkFor(value, key) {
+  var id = String(value.id || "")
+  if (!id) return ""
+  return key === "uri" ? "spotify:" + value.type + ":" + id
+    : "https://open.spotify.com/" + value.type + "/" + id
+}
+
+// What normalizeTrack produces when Spotify leaves a field out or repeats one
+// the row already has.
+function songTrackDefault(row, key) {
+  var album = row.albumItem
+  if (key === "kind") return "item"
+  if (key === "type") return "track"
+  if (key === "name") return "Untitled"
+  if (key === "uri" || key === "externalUrl") return spotifyLinkFor(row, key)
+  if (key === "subtitle") return artistNames(row.artists)
+  if (key === "album") return album ? album.name : ""
+  if (key === "imageUrl") return album ? album.imageUrl : ""
+  if (key === "releaseDate") return album ? album.releaseDate : ""
+  if (key === "artists") return []
+  if (key === "albumItem" || key === "parentContext") return null
+  if (key === "discNumber") return row.type === "track" ? 1 : 0
+  if (key === "durationMs" || key === "trackNumber" || key === "resumeMs") return 0
+  if (key === "fullyPlayed" || key === "explicit") return false
+  return ""
+}
+
+function songContextDefault(context, key) {
+  if (key === "kind") return "context"
+  if (key === "type") return "artist"
+  if (key === "name") return "Untitled"
+  if (key === "uri" || key === "externalUrl") return spotifyLinkFor(context, key)
+  if (key === "subtitle") {
+    if (context.type === "artist") return "Artist"
+    if (context.type !== "album") return ""
+    var details = []
+    var names = artistNames(context.artists)
+    if (names) details.push(names)
+    details.push("Release")
+    if (context.releaseDate) details.push(String(context.releaseDate).slice(0, 4))
+    return details.join(" · ")
+  }
+  if (key === "artists" || key === "genres") return []
+  if (key === "total" || key === "followers" || key === "popularity") return 0
+  if (key === "collaborative" || key === "public") return false
+  return ""
+}
+
+function sameSongValue(value, fallback) {
+  if (Array.isArray(fallback)) return Array.isArray(value) && value.length === 0
+  return value === fallback
+}
+
+// Only rows with exactly the normalizer's fields, in its order, are shortened;
+// their keys come back, and null for anything else. A field beyond those is
+// kept under its own name, so it must not read as one of the short ones.
+function songFieldNames(value, fields, aliases, extras) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  var names = Object.keys(value)
+  if (names.length < fields.length || (!extras && names.length > fields.length)) return null
+  for (var i = 0; i < names.length; i++) {
+    if (value[names[i]] === undefined) return null
+    if (i < fields.length) {
+      if (names[i] !== fields[i][0]) return null
+    } else if (!SONG_EXTRA_NAMES.hasOwnProperty(names[i])
+        && (aliases.hasOwnProperty(names[i]) || SONG_EXTRA_ALIASES.hasOwnProperty(names[i])))
+      return null
+  }
+  return names
+}
+
+function songArtistRefs(artists, table) {
+  if (!Array.isArray(artists)) return null
+  var refs = []
+  for (var i = 0; i < artists.length; i++) {
+    var ref = songContextRef(artists[i], table)
+    if (ref < 0) return null
+    refs.push(ref)
+  }
+  return refs
+}
+
+function songContextRef(context, table) {
+  if (!songFieldNames(context, SONG_CONTEXT_FIELDS, SONG_CONTEXT_ALIASES, false)) return -1
+  var out = ({})
+  for (var i = 0; i < SONG_CONTEXT_FIELDS.length; i++) {
+    var key = SONG_CONTEXT_FIELDS[i][0]
+    var value = context[key]
+    if (key === "artists") {
+      var refs = songArtistRefs(value, table)
+      if (!refs) return -1
+      if (refs.length) out.a = refs
+    } else if (!sameSongValue(value, songContextDefault(context, key)))
+      out[SONG_CONTEXT_FIELDS[i][1]] = value
+  }
+  var text = JSON.stringify(out)
+  if (!table.index.hasOwnProperty(text)) {
+    table.index[text] = table.refs.length
+    table.refs.push(out)
+  }
+  return table.index[text]
+}
+
+function songRowRecord(row, table) {
+  var names = songFieldNames(row, SONG_TRACK_FIELDS, SONG_TRACK_ALIASES, true)
+  if (!names) return [row]
+  var out = ({})
+  for (var i = 0; i < SONG_TRACK_FIELDS.length; i++) {
+    var key = SONG_TRACK_FIELDS[i][0]
+    var alias = SONG_TRACK_FIELDS[i][1]
+    var value = row[key]
+    if (key === "artists") {
+      var refs = songArtistRefs(value, table)
+      if (!refs) return [row]
+      if (refs.length) out.a = refs
+    } else if (key === "albumItem" || key === "parentContext") {
+      if (value === null) continue
+      var context = songContextRef(value, table)
+      if (context < 0) return [row]
+      out[alias] = context
+    } else if (!sameSongValue(value, songTrackDefault(row, key))) out[alias] = value
+  }
+  for (var e = SONG_TRACK_FIELDS.length; e < names.length; e++)
+    out[SONG_EXTRA_NAMES.hasOwnProperty(names[e]) ? SONG_EXTRA_NAMES[names[e]] : names[e]] = row[names[e]]
+  return out
+}
+
+function encodePlaylistSongs(items) {
+  var table = { refs: [], index: ({}) }
+  var rows = []
+  var source = Array.isArray(items) ? items : []
+  for (var i = 0; i < source.length; i++) rows.push(songRowRecord(source[i], table))
+  return { refs: table.refs, rows: rows }
+}
+
+function songRefList(record, decoded) {
+  var refs = Array.isArray(record.a) ? record.a : []
+  var out = []
+  for (var i = 0; i < refs.length; i++) {
+    if (!decoded[refs[i]]) return null
+    out.push(decoded[refs[i]])
+  }
+  return out
+}
+
+function songContextFromRecord(record, decoded) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return null
+  var basis = { type: record.hasOwnProperty("y") ? record.y : "artist",
+    id: record.hasOwnProperty("i") ? record.i : "",
+    artists: songRefList(record, decoded),
+    releaseDate: record.hasOwnProperty("r") ? record.r : "" }
+  if (!basis.artists) return null
+  var out = ({})
+  for (var i = 0; i < SONG_CONTEXT_FIELDS.length; i++) {
+    var key = SONG_CONTEXT_FIELDS[i][0]
+    var alias = SONG_CONTEXT_FIELDS[i][1]
+    out[key] = key === "artists" ? basis.artists
+      : record.hasOwnProperty(alias) ? record[alias] : songContextDefault(basis, key)
+  }
+  return out
+}
+
+function songRowFromRecord(record, decoded) {
+  if (Array.isArray(record)) return record.length === 1 ? record[0] : null
+  if (!record || typeof record !== "object") return null
+  var basis = { type: record.hasOwnProperty("y") ? record.y : "track",
+    id: record.hasOwnProperty("i") ? record.i : "",
+    artists: songRefList(record, decoded), albumItem: null, parentContext: null }
+  if (!basis.artists) return null
+  if (record.hasOwnProperty("b") && !(basis.albumItem = decoded[record.b] || null)) return null
+  if (record.hasOwnProperty("c") && !(basis.parentContext = decoded[record.c] || null)) return null
+  var out = ({})
+  for (var i = 0; i < SONG_TRACK_FIELDS.length; i++) {
+    var key = SONG_TRACK_FIELDS[i][0]
+    var alias = SONG_TRACK_FIELDS[i][1]
+    out[key] = key === "artists" || key === "albumItem" || key === "parentContext" ? basis[key]
+      : record.hasOwnProperty(alias) ? record[alias] : songTrackDefault(basis, key)
+  }
+  for (var stored in record)
+    if (!SONG_TRACK_ALIASES.hasOwnProperty(stored))
+      out[SONG_EXTRA_ALIASES.hasOwnProperty(stored) ? SONG_EXTRA_ALIASES[stored] : stored] = record[stored]
+  return out
+}
+
+// Rows that share an artist or album share the one rebuilt object.
+function decodePlaylistSongs(encoded) {
+  var source = encoded || {}
+  if (!Array.isArray(source.refs) || !Array.isArray(source.rows)) return null
+  var decoded = []
+  for (var r = 0; r < source.refs.length; r++) {
+    var context = songContextFromRecord(source.refs[r], decoded)
+    if (!context) return null
+    decoded.push(context)
+  }
+  var rows = []
+  for (var i = 0; i < source.rows.length; i++) {
+    var row = songRowFromRecord(source.rows[i], decoded)
+    if (!row) return null
+    rows.push(row)
+  }
+  return rows
+}
+
+// A kept playlist resumes after the last Spotify position it holds, which
+// counts duplicates and unavailable entries. Anything else cannot be resumed.
+function playlistResumeCursor(item, items) {
+  var rows = Array.isArray(items) ? items : []
+  if (!item || item.type !== "playlist" || !item.id || !rows.length) return ""
+  var last = rows[rows.length - 1] ? rows[rows.length - 1].playlistPosition : undefined
+  var position = Number(last)
+  if (last === null || last === undefined || !isFinite(position) || position < 0) return ""
+  return API_BASE + "/playlists/" + encodeURIComponent(String(item.id))
+    + "/items?offset=" + (Math.floor(position) + 1) + "&limit=50"
 }
 
 // The library changes rarely, so a recent copy is trusted rather than
@@ -2828,6 +3177,9 @@ function normalizeContext(value, imageWidth) {
 function normalizePlaylist(value, imageWidth) {
   var normalized = normalizeContext(value, imageWidth)
   if (!normalized || normalized.type !== "playlist") return null
+  // Lists draw the small cover; the playlist's own page draws it at 256 px.
+  var source = value || {}
+  normalized.coverUrl = imageFor((source.playlist || source).images, 256)
   return normalized
 }
 
@@ -3115,6 +3467,8 @@ function requestTimingLine(method, path, timings, context) {
     + " bg " + (Number(c.background) || 0)
     + " queued " + (Number(c.queued) || 0)
     + " " + (String(c.priority || "") || "normal")
+    // Which app's quota paid for it; the two transports log in one stream.
+    + (c.app ? " " + String(c.app) : "")
 }
 
 var LIBRARY_FILTER_MODES = ["all", "playlist", "artist", "album", "show"]

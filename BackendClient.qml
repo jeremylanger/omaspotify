@@ -64,6 +64,16 @@ Item {
     return id
   }
 
+  // One page of a playlist through the Connect session; a limit of 0 asks
+  // for its version and length only.
+  function playlistItems(uri, offset, limit, callback) {
+    return sendCommand("playlist_items", {
+      uri: String(uri || ""),
+      offset: Math.max(0, Math.floor(Number(offset) || 0)),
+      limit: Math.max(0, Math.floor(Number(limit) || 0))
+    }, callback)
+  }
+
   function loadPlayback(body, callback, trackUri) {
     var fields = Api.backendLoadFields(body, trackUri)
     if (!fields) {
