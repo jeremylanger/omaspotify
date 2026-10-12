@@ -1598,6 +1598,17 @@ TestCase {
     compare(Api.spotifyTrackId("/spotify/episode/not-a-track"), "")
   }
 
+  function test_spotifyLinkItem_acceptsUrisAndWebLinks() {
+    compare(Api.spotifyLinkItem("spotify:track:7KFV09JUeoWlKei8kpy530"),
+      { type: "track", uri: "spotify:track:7KFV09JUeoWlKei8kpy530" })
+    compare(Api.spotifyLinkItem("https://open.spotify.com/album/1a2B?si=x"),
+      { type: "album", uri: "spotify:album:1a2B" })
+    compare(Api.spotifyLinkItem("https://open.spotify.com/intl-pt/playlist/9Z"),
+      { type: "playlist", uri: "spotify:playlist:9Z" })
+    compare(Api.spotifyLinkItem("https://example.com/track/abc"), null)
+    compare(Api.spotifyLinkItem(""), null)
+  }
+
   function test_currentPlaybackTrack_reusesRemoteTracksAndSynthesizesMprisTracks() {
     var remote = {
       id: "remote-id", uri: "spotify:track:remote-id", type: "track",

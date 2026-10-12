@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Spotify links can now be played in OmaSpotify with the new `openUri`
+  command, so it can open `spotify:` links from the browser and other apps
+  the way the desktop client does, and shows the media OSD when the song
+  starts. The README shows how to set that up.
 - On a Sonos, shuffle and repeat-one can now be on together. Turning shuffle
   on during repeat-one did nothing, and switching repeat to repeat-one turned
   shuffle off.

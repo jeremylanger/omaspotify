@@ -1795,6 +1795,13 @@ function spotifyTrackId(value) {
   return match ? match[1] : ""
 }
 
+// What a spotify: URI or open.spotify.com link points at, as a playable item.
+function spotifyLinkItem(value) {
+  var match = String(value || "").match(
+    /^(?:spotify:|https:\/\/open\.spotify\.com\/(?:intl-[\w-]+\/)?)(track|album|artist|playlist|episode)[:\/]([A-Za-z0-9]+)/)
+  return match ? { type: match[1], uri: "spotify:" + match[1] + ":" + match[2] } : null
+}
+
 // Playback from another Spotify Connect device already carries a normalized
 // item. Local playback may expose only MPRIS metadata, so synthesize
 // the small track shape needed by library actions in that case. A matching

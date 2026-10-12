@@ -592,6 +592,7 @@ Item {
   property string pendingPlaybackMessage: ""
   property var pendingPlaybackRadio: null
   property int pendingPlaybackSerial: 0
+  property double linkOsdUntil: 0
   property int radioSerial: 0
   property var lastRadioPlaylist: null
   property bool radioContextSelected: false
@@ -3588,6 +3589,14 @@ Item {
       var surface = root.shortcutSurface()
       return surface && surface.adjustVolume(-0.05) ? "ok" : "unavailable"
     }
+    function openUri(uri: string): string {
+      var item = Api.spotifyLinkItem(uri)
+      if (!item) return "unsupported"
+      root.playItem(item)
+      // Shows the same OSD as the media keys once the song has loaded.
+      root.linkOsdUntil = Date.now() + 10000
+      return "ok"
+    }
   }
 
   function search(term, type, force) { return searchController.search(term, type, force) }
@@ -4515,6 +4524,15 @@ Item {
   onPlaybackStateChanged: sleepTimer.noteStopped(
     playbackState === MprisPlaybackState.Stopped)
   onCurrentUriChanged: sleepTimer.noteCurrentUriChanged(currentUri)
+  // The shell refuses omarchy.osd to third-party plugins, so this goes through
+  // its command line like a keybinding would.
+  onTitleChanged: {
+    if (Date.now() > linkOsdUntil || !title) return
+    linkOsdUntil = 0
+    linkOsdCommand.command = ["omarchy-shell", "shell", "summon", "omarchy.osd",
+      JSON.stringify({ icon: "media-play", message: artist ? title + " - " + artist : title })]
+    linkOsdCommand.running = true
+  }
   onCurrentTrackItemUriChanged: syncCurrentTrackSaved(false)
   onShellChanged: settingsSync.restart()
   onUiVisibleChanged: {
@@ -4914,6 +4932,8 @@ Item {
     repeat: false
     onTriggered: root.probeForLocalDevice()
   }
+
+  Process { id: linkOsdCommand }
 
   Timer {
     id: visibleLocalDeviceRefreshTimer

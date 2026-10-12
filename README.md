@@ -160,6 +160,30 @@ omarchy shell -q io.github.jeremylanger.omaspotify.player volumeDown
 Each step is 5%, the same as Ctrl+Up / Ctrl+Down. This changes Spotify's own
 volume, including speakers, not the computer's output level.
 
+Play a Spotify link, or a `spotify:` URI, in OmaSpotify:
+
+```bash
+omarchy shell -q io.github.jeremylanger.omaspotify.player openUri \
+  "https://open.spotify.com/track/7KFV09JUeoWlKei8kpy530"
+```
+
+To have `spotify:` links from your browser and other apps open here, save this
+as `~/.local/share/applications/omaspotify-open.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=OmaSpotify
+Exec=omarchy shell -q io.github.jeremylanger.omaspotify.player openUri %u
+MimeType=x-scheme-handler/spotify;
+NoDisplay=true
+```
+
+Then run `xdg-mime default omaspotify-open.desktop x-scheme-handler/spotify`.
+Links shared from Spotify, the ones with `?si=`, then make Spotify's website
+offer to open them in OmaSpotify. The browser asks first and can remember the
+choice.
+
 ### Connect your Spotify account
 
 1. Click the Spotify icon in your bar (on the left by default; your layout may
