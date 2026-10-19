@@ -178,7 +178,15 @@ BarWidget {
   function toggleMiniPlayerShortcut() {
     if (!bar || typeof bar.isBarWidgetOpen !== "function"
         || typeof bar.hideBarWidget !== "function"
-        || typeof bar.summonBarWidget !== "function") return "unavailable"
+        || typeof bar.summonBarWidget !== "function") {
+      // Fallback: the shell's plugin bar API doesn't expose the
+      // summon/hide helpers, so toggle this widget directly.
+      if (!bar) return "unavailable"
+      if (popupOpen) { close(); return "closed" }
+      pendingShortcutLatch = true
+      open()
+      return "opened"
+    }
     if (bar.isBarWidgetOpen(moduleName))
       return bar.hideBarWidget(moduleName) ? "closed" : "unavailable"
     pendingShortcutLatch = true
